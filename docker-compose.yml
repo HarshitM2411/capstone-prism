@@ -1,0 +1,129 @@
+# One-command local/demo stack:  docker compose up --build
+#
+#   gateway   http://localhost:8080   (GET /health)
+#   console   http://localhost:3000
+#   alpha     http://localhost:9001   mock provider (alpha-small, alpha-large)
+#   beta      http://localhost:9002   mock provider (beta-small, beta-large)
+#   postgres  localhost:5432          Postgres + pgvector
+#   redis     localhost:6379
+#
+# Every value has a default, so a .env file is optional (see .env.example).
+# The mock providers' /admin/config endpoints are for local demo/testing only.
+
+name: prism
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-prism}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prism}
+      POSTGRES_DB: ${POSTGRES_DB:-prism}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  alpha:
+    image: python:3.12-slim
+    command: ['python', '/app/mock_provider.py', '--port', '9001', '--name', 'alpha']
+    volumes:
+      - ./scripts/mock_provider.py:/app/mock_provider.py:ro
+    ports:
+      - '${ALPHA_PORT:-9001}:9001'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:9001/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  beta:
+    image: python:3.12-slim
+    command: ['python', '/app/mock_provider.py', '--port', '9002', '--name', 'beta']
+    volumes:
+      - ./scripts/mock_provider.py:/app/mock_provider.py:ro
+    ports:
+      - '${BETA_PORT:-9002}:9002'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:9002/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    environment:
+      PORT: '8080'
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-demo-admin-token}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-2000}
+      UPSTREAM_IDLE_TIMEOUT_MS: ${UPSTREAM_IDLE_TIMEOUT_MS:-2000}
+      REQUEST_DEADLINE_MS: ${REQUEST_DEADLINE_MS:-10000}
+      DATABASE_URL: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@postgres:5432/${POSTGRES_DB:-prism}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '${GATEWAY_PORT:-8080}:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      alpha:
+        condition: service_healthy
+      beta:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  console:
+    build:
+      context: .
+      dockerfile: apps/console/Dockerfile
+    ports:
+      - '${CONSOLE_PORT:-3000}:80'
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  pgdata:
