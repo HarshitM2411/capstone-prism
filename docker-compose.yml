@@ -92,6 +92,12 @@ services:
       REQUEST_DEADLINE_MS: ${REQUEST_DEADLINE_MS:-10000}
       DATABASE_URL: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@postgres:5432/${POSTGRES_DB:-prism}
       REDIS_URL: redis://redis:6379
+      DATA_DIR: /data
+      GATEWAY_CONFIG_FILE: ${GATEWAY_CONFIG_FILE:-gateway_config.docker.json}
+      SEED_ON_START: ${SEED_ON_START:-true}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+    volumes:
+      - ./data:/data:ro
     ports:
       - '${GATEWAY_PORT:-8080}:8080'
     depends_on:

@@ -63,14 +63,16 @@ This plan breaks the build into phases. Each phase has a goal, concrete tasks, a
 
 **Goal:** Durable storage exists and is populated with the provided seed data.
 
-- [ ] Postgres schema/migrations for `virtual_keys`, `budget_usage` (with `reserved_usd`), `request_logs`, `cache_entries` (per architecture.md §5).
-- [ ] Enable `pgvector` extension; `cache_entries.embedding` as a `vector` column; indexes on `request_logs (key_id, created_at)` and the cache lookup path.
-- [ ] Startup config loader: reads `model_pricing.json` and `gateway_config.sample.json` (providers, aliases incl. `auto`, retry policy, degradation settings) into validated in-memory structures (alias → model → fallback chain, model → price, model → provider). **Fail fast** on a missing/malformed file, an alias target missing from the price table, or a fallback not served by a registered provider.
-- [ ] Seed script: loads `seed_keys.json` into `virtual_keys` — `team`, hashed key, budget, RPM (and TPM when present), allowlist, **per-key cache `enabled`/`similarity_threshold`**, `status`, `created_at` — **preserving exact key values, team names and alias names** (spec requirement — demo/scripts depend on these). Idempotent: re-seeding changes nothing and creates no duplicates.
-- [ ] Money handling decided and implemented once: integer-scaled arithmetic / `NUMERIC`, never floats (architecture.md §4.9).
-- [ ] DB access layer (lightweight query module, no heavy ORM needed — e.g. `pg` + hand-written SQL, or Drizzle if we want type-safe queries) with a bounded connection pool.
+- [x] Postgres schema/migrations for `virtual_keys`, `budget_usage` (with `reserved_usd`), `request_logs`, `cache_entries` (per architecture.md §5).
+- [x] Enable `pgvector` extension; `cache_entries.embedding` as a `vector` column; indexes on `request_logs (key_id, created_at)` and the cache lookup path.
+- [x] Startup config loader: reads `model_pricing.json` and `gateway_config.sample.json` (providers, aliases incl. `auto`, retry policy, degradation settings) into validated in-memory structures (alias → model → fallback chain, model → price, model → provider). **Fail fast** on a missing/malformed file, an alias target missing from the price table, or a fallback not served by a registered provider.
+- [x] Seed script: loads `seed_keys.json` into `virtual_keys` — `team`, hashed key, budget, RPM (and TPM when present), allowlist, **per-key cache `enabled`/`similarity_threshold`**, `status`, `created_at` — **preserving exact key values, team names and alias names** (spec requirement — demo/scripts depend on these). Idempotent: re-seeding changes nothing and creates no duplicates.
+- [x] Money handling decided and implemented once: integer-scaled arithmetic / `NUMERIC`, never floats (architecture.md §4.9).
+- [x] DB access layer (lightweight query module, no heavy ORM needed — e.g. `pg` + hand-written SQL, or Drizzle if we want type-safe queries) with a bounded connection pool.
 
 **Exit criteria:** Fresh container start → migrations run → seed keys queryable from DB → config maps loaded and logged at startup. Re-running the seed is a no-op. Unit tests for the config loader (including the fail-fast cases) and the seed script.
+
+**Status: complete.** Notes: the seed upserts by 	eam and never touches status, so a key disabled in the database stays disabled; the Docker config is data/gateway_config.docker.json (same as the sample, with the provider hostnames lpha and eta) because localhost is not reachable from the gateway container; the gateway's /health now reports Postgres (200 ok, or 503 degraded).
 
 ---
 

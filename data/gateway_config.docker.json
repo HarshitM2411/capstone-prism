@@ -1,0 +1,20 @@
+{
+  "_comment": "Same as gateway_config.sample.json, but the providers use the Docker Compose service names (alpha, beta) instead of localhost. Used by the gateway container via GATEWAY_CONFIG_FILE.",
+  "providers": [
+    { "name": "alpha", "base_url": "http://alpha:9001/v1", "api_key": "mock-key-alpha" },
+    { "name": "beta", "base_url": "http://beta:9002/v1", "api_key": "mock-key-beta" }
+  ],
+  "model_aliases": {
+    "fast": { "primary": "alpha-small", "fallbacks": ["beta-small"] },
+    "smart": { "primary": "alpha-large", "fallbacks": ["beta-large"] },
+    "auto": {
+      "route_by_difficulty": { "simple": "fast", "complex": "smart" }
+    }
+  },
+  "retry": { "max_attempts": 3, "initial_backoff_ms": 200, "backoff_multiplier": 2 },
+  "degradation": {
+    "error_rate_threshold": 0.5,
+    "window_seconds": 60,
+    "p95_latency_ms": 5000
+  }
+}
