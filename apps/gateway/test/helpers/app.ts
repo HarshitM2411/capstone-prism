@@ -12,6 +12,7 @@ import {
   type ReserveInput,
 } from '../../src/limits/budget.js';
 import type { RateLimitDecision, RateLimiter } from '../../src/limits/rpm.js';
+import { FakeRegistry } from '../../src/providers/fake.js';
 import { DATA_DIR } from './dataDir.js';
 
 export const config = loadGatewayConfig(DATA_DIR);
@@ -163,8 +164,12 @@ export function memoryBudget(logs: RequestLogWriter, events: Events = []): Memor
   return store;
 }
 
+/** Short limits so timeout tests finish quickly. */
+export const TEST_TIMEOUTS = { firstByteMs: 300, idleMs: 300, deadlineMs: 1500 };
+
 export interface TestApp {
   app: FastifyInstance;
+  providers: FakeRegistry;
   keys: ReturnType<typeof memoryKeys>;
   logs: ReturnType<typeof memoryLogs>;
   limiter: ReturnType<typeof memoryRateLimiter>;
@@ -178,6 +183,7 @@ export function buildTestApp(overrides: Partial<AppOptions> = {}): TestApp {
   const logs = memoryLogs();
   const limiter = memoryRateLimiter(events);
   const budget = memoryBudget(logs, events);
+  const providers = new FakeRegistry([...config.providers.keys()]);
   const app = buildApp({
     logLevel: 'silent',
     config,
@@ -185,10 +191,12 @@ export function buildTestApp(overrides: Partial<AppOptions> = {}): TestApp {
     requestLogs: logs,
     rateLimiter: limiter,
     budget,
+    providers,
+    timeouts: TEST_TIMEOUTS,
     adminToken: ADMIN_TOKEN,
     ...overrides,
   });
-  return { app, keys, logs, limiter, budget, events };
+  return { app, providers, keys, logs, limiter, budget, events };
 }
 
 /** Request logs are written just after the response is sent, so poll briefly for them. */

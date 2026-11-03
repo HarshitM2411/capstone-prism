@@ -120,6 +120,31 @@ export function serviceUnavailable(message: string, code = 'service_unavailable'
   return new PrismError(503, 'service_unavailable', code, message, 'rejected_unavailable');
 }
 
+/**
+ * The provider could not produce a response. Deliberately generic: the provider's own message,
+ * body and credentials never reach the client (edge case 8.17).
+ */
+export function upstreamError(): PrismError {
+  return new PrismError(
+    502,
+    'upstream_error',
+    'upstream_error',
+    'The upstream model provider failed to produce a response. Please retry shortly.',
+    'upstream_error',
+  );
+}
+
+/** The client closed the connection before the response was ready. Nobody reads this response. */
+export function clientClosed(): PrismError {
+  return new PrismError(
+    499,
+    'invalid_request_error',
+    'client_closed_request',
+    'The client closed the connection before the response was ready.',
+    'client_disconnect',
+  );
+}
+
 export function internalError(): PrismError {
   return new PrismError(
     500,

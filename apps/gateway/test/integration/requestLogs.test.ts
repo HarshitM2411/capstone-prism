@@ -9,6 +9,8 @@ import { PgBudgetStore } from '../../src/limits/budget.js';
 import { RedisRateLimiter } from '../../src/limits/rpm.js';
 import type { RedisClient } from '../../src/redis.js';
 import { loadAllConfig } from '../../src/startup.js';
+import { FakeRegistry } from '../../src/providers/fake.js';
+import { TEST_TIMEOUTS } from '../helpers/app.js';
 import { DATA_DIR } from '../helpers/dataDir.js';
 import { freshPool } from '../helpers/testDb.js';
 import { freshRedis } from '../helpers/testRedis.js';
@@ -30,6 +32,8 @@ function appFor(target: Pool): FastifyInstance {
     requestLogs: createRequestLogWriter(target),
     rateLimiter: new RedisRateLimiter(redis),
     budget: new PgBudgetStore(target),
+    providers: new FakeRegistry(['alpha', 'beta']),
+    timeouts: TEST_TIMEOUTS,
     adminToken: 'test-admin-token-123',
   });
   return app;
@@ -78,6 +82,10 @@ interface LogRow {
   latency_ms: number;
   cost_usd: string;
   cache: string;
+  resolved_provider: string | null;
+  resolved_model: string | null;
+  fallback: boolean;
+  retries: number;
 }
 
 async function logs(): Promise<LogRow[]> {
@@ -101,7 +109,7 @@ describe('end to end against Postgres: auth → validation → resolution → lo
     ]) {
       const res = await post(instance, key);
       expect(res.statusCode, key).toBe(200);
-      expect(res.headers['x-prism-provider']).toBe('none');
+      expect(res.headers['x-prism-provider']).toBe('alpha/alpha-small');
     }
     expect(await logs()).toHaveLength(4);
   });
@@ -128,6 +136,10 @@ describe('end to end against Postgres: auth → validation → resolution → lo
       status: 'ok',
       http_status: 200,
       error_code: null,
+      resolved_provider: 'alpha',
+      resolved_model: 'alpha-small',
+      fallback: false,
+      retries: 0,
       cache: 'miss',
     });
     expect(Number(byId.get(ok.headers['x-request-id'] as string)?.cost_usd)).toBeGreaterThan(0);

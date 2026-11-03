@@ -15,6 +15,8 @@ export interface RequestContext {
   requestedModel: string | null;
   /** The concrete model that was priced or served, once known. */
   resolvedModel: string | null;
+  /** The provider that was called, once a provider call was made. */
+  resolvedProvider: string | null;
   logStatus: LogStatus;
   errorCode: string | null;
   /** The log row was already written (together with the budget settlement). */

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { computeCostUnits, formatUsd } from '../src/money.js';
+import { fakeReply } from '../src/providers/fake.js';
 import { readSampleRequests } from './helpers/dataDir.js';
 import {
   ADMIN_TOKEN,
@@ -77,12 +78,15 @@ describe('POST /v1/chat/completions — success (stub)', () => {
       model: 'fast',
       choices: [{ index: 0, message: { role: 'assistant' }, finish_reason: 'stop' }],
     });
-    expect(body.choices[0].message.content).toBeTypeOf('string');
-    // The stub reports real, non-zero usage ('What is a message queue?' is 5 words) ...
+    // The answer comes from the `fast` primary, alpha-small, through its adapter.
+    const upstream = current!.providers.must('alpha').calls[0]!.request;
+    expect(upstream.model).toBe('alpha-small');
+    expect(body.choices[0].message.content).toBe(fakeReply('alpha', upstream));
+    // Usage is what the provider reported ('What is a message queue?' is 5 words) ...
     expect(body.usage.prompt_tokens).toBe(5);
     expect(body.usage.completion_tokens).toBeGreaterThan(20);
     expect(body.usage.total_tokens).toBe(body.usage.prompt_tokens + body.usage.completion_tokens);
-    // ... priced at the `fast` primary (alpha-small): 0.15 / 0.60 USD per 1M tokens.
+    // ... priced at alpha-small: 0.15 / 0.60 USD per 1M tokens.
     const expectedUnits = computeCostUnits(
       body.usage.prompt_tokens,
       body.usage.completion_tokens,
@@ -90,7 +94,7 @@ describe('POST /v1/chat/completions — success (stub)', () => {
     );
     expect(res.headers['x-prism-cost-usd']).toBe(formatUsd(expectedUnits));
     expect(expectedUnits).toBeGreaterThan(0n);
-    expect(res.headers['x-prism-provider']).toBe('none');
+    expect(res.headers['x-prism-provider']).toBe('alpha/alpha-small');
     expect(res.headers['x-prism-cache']).toBe('miss');
     expect(res.headers['x-prism-fallback']).toBe('false');
   });
@@ -150,6 +154,7 @@ describe('POST /v1/chat/completions — success (stub)', () => {
       keyId: 2,
       requestedModel: 'fast',
       resolvedModel: 'alpha-small',
+      resolvedProvider: 'alpha',
       status: 'ok',
       httpStatus: res.statusCode,
       errorCode: null,

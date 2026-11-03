@@ -115,16 +115,18 @@ This plan breaks the build into phases. Each phase has a goal, concrete tasks, a
 
 **Goal:** The `ProviderAdapter` interface exists, one OpenAI-compatible adapter drives the mock providers, and a non-streaming request flows end to end through a single provider.
 
-- [ ] Define `ProviderAdapter` interface (architecture.md §4.6): `chatCompletion()`, `chatCompletionStream()`.
-- [ ] `OpenAICompatibleAdapter` against a `base_url` + `api_key` (works for the mocks now, real providers later by configuration only).
-- [ ] In-process **fake adapter** for deterministic, fast automated tests (configurable latency, failure/timeout injection, token-by-token streaming simulation, deterministic usage).
-- [ ] Timeouts at the adapter boundary for every call: connect/first-byte, per-chunk idle, plus an overall request deadline. Defaults must trip on a mock made slow with `latency_ms: 3000` (demo requirement) and be configurable.
-- [ ] Malformed upstream responses (invalid JSON, missing `usage`/`choices`) are handled and logged, never crash the gateway; provider error bodies are mapped to clean gateway errors and never forwarded raw. Provider keys never appear in responses or logs.
-- [ ] Core pass-through: `POST /v1/chat/completions` → resolve alias to its **primary** model → adapter → OpenAI-shaped response, cost computed from provider-reported usage × price table, header contract filled in (`x-prism-provider` like `alpha/alpha-small`, `x-prism-cache: miss`, `x-prism-fallback: false`, `x-prism-cost-usd`), request log written, budget settled.
-- [ ] Drive the real mocks by hand with curl (non-streaming) before relying on any assumption about their behavior.
-- [ ] Unit tests: the fake adapter and the adapter's error/timeout mapping behave deterministically so later failover/load tests are reproducible.
+- [x] Define `ProviderAdapter` interface (architecture.md §4.6): `chatCompletion()`, `chatCompletionStream()`.
+- [x] `OpenAICompatibleAdapter` against a `base_url` + `api_key` (works for the mocks now, real providers later by configuration only).
+- [x] In-process **fake adapter** for deterministic, fast automated tests (configurable latency, failure/timeout injection, token-by-token streaming simulation, deterministic usage).
+- [x] Timeouts at the adapter boundary for every call: connect/first-byte, per-chunk idle, plus an overall request deadline. Defaults must trip on a mock made slow with `latency_ms: 3000` (demo requirement) and be configurable.
+- [x] Malformed upstream responses (invalid JSON, missing `usage`/`choices`) are handled and logged, never crash the gateway; provider error bodies are mapped to clean gateway errors and never forwarded raw. Provider keys never appear in responses or logs.
+- [x] Core pass-through: `POST /v1/chat/completions` → resolve alias to its **primary** model → adapter → OpenAI-shaped response, cost computed from provider-reported usage × price table, header contract filled in (`x-prism-provider` like `alpha/alpha-small`, `x-prism-cache: miss`, `x-prism-fallback: false`, `x-prism-cost-usd`), request log written, budget settled.
+- [x] Drive the real mocks by hand with curl (non-streaming) before relying on any assumption about their behavior.
+- [x] Unit tests: the fake adapter and the adapter's error/timeout mapping behave deterministically so later failover/load tests are reproducible.
 
 **Exit criteria:** A `fast` request returns a correct OpenAI-shaped response from `alpha-small` with correct headers, cost and log row; a simulated slow/dead provider (via the mock's `/admin/config` or the fake adapter) produces a timely error, never a hang.
+
+**Status: complete.** Notes: `src/providers/` holds the `ProviderAdapter` interface, `OpenAICompatibleAdapter` (built on `fetch`; both `chatCompletion` and `chatCompletionStream` are implemented and tested, the stream is wired into the route in Phase 6), the `FakeAdapter`, and a registry built from the config. Every provider failure is a `ProviderError` with a kind (`timeout`, `connection`, `server_error`, `rate_limited`, `malformed`, `auth`, `bad_request`, `aborted`) and a built-in disposition (`retry`, `failover`, `fatal`, `abort`) that Phase 5's engine will act on; its message never contains the provider's body or key, and redirects are never followed. A response without valid `usage`, or reporting zero tokens in total, is `malformed` (never billed as free). Timeouts are environment settings: `PROVIDER_FIRST_BYTE_TIMEOUT_MS` (default 2000, so a mock at `latency_ms: 3000` trips it), `PROVIDER_IDLE_TIMEOUT_MS` (10000) and `REQUEST_DEADLINE_MS` (15000, also the cap on all attempts once Phase 5 adds retries). Until then a failed call returns `502 upstream_error` (generic message, nothing billed, the hold released, the log row `upstream_error` with the provider and model tried). `x-prism-provider` is `provider/model` (for example `alpha/alpha-small`); the response `model` echoes the name the client sent. Streaming requests are still answered by the stub, and `auto` is priced and routed as `smart` until Phase 7's classifier. Verified live against the real mocks: `fast` served by `alpha-small`, `smart` by `alpha-large`, a 3000 ms mock gives `502` after 2.0 s, a `down` or `rate_limited` mock gives `502` immediately, and the next request after restoring the mock succeeds.
 
 ---
 

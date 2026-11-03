@@ -27,6 +27,12 @@ export interface Env {
   redisUrl: string;
   /** Per-command Redis timeout; on expiry the rate limiter fails closed (edge case 4.4). */
   redisTimeoutMs: number;
+  /** How long a provider may take to start answering (response headers) before the call is abandoned. */
+  providerFirstByteTimeoutMs: number;
+  /** For streams: the longest silence tolerated between two chunks. */
+  providerIdleTimeoutMs: number;
+  /** Cap on the whole provider call (and, from Phase 5, on all attempts of one request). */
+  requestDeadlineMs: number;
   /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
   adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
@@ -141,6 +147,21 @@ export function loadEnv(
   const dataDir = source.DATA_DIR?.trim() || DEFAULT_DATA_DIR;
   const gatewayConfigFile = source.GATEWAY_CONFIG_FILE?.trim() || 'gateway_config.sample.json';
 
+  const providerFirstByteTimeoutMs = parseInteger(
+    source,
+    'PROVIDER_FIRST_BYTE_TIMEOUT_MS',
+    2000,
+    100,
+    120_000,
+  );
+  const requestDeadlineMs = parseInteger(source, 'REQUEST_DEADLINE_MS', 15_000, 200, 600_000);
+  if (providerFirstByteTimeoutMs > requestDeadlineMs) {
+    throw new ConfigError(
+      'PROVIDER_FIRST_BYTE_TIMEOUT_MS must not exceed REQUEST_DEADLINE_MS ' +
+        `(got ${providerFirstByteTimeoutMs} > ${requestDeadlineMs})`,
+    );
+  }
+
   return {
     port,
     host,
@@ -150,6 +171,9 @@ export function loadEnv(
     dbConnectTimeoutMs: parseInteger(source, 'DB_CONNECT_TIMEOUT_MS', 5000, 100, 120_000),
     redisUrl,
     redisTimeoutMs: parseInteger(source, 'REDIS_TIMEOUT_MS', 500, 50, 10_000),
+    providerFirstByteTimeoutMs,
+    providerIdleTimeoutMs: parseInteger(source, 'PROVIDER_IDLE_TIMEOUT_MS', 10_000, 100, 120_000),
+    requestDeadlineMs,
     adminToken,
     dataDir,
     gatewayConfigFile,

@@ -67,6 +67,44 @@ describe('loadEnv', () => {
     });
   });
 
+  describe('provider timeouts', () => {
+    it('default to values that trip on a mock made slow with latency_ms: 3000', () => {
+      const env = loadEnv(base);
+      expect(env.providerFirstByteTimeoutMs).toBeLessThan(3000);
+      expect(env).toMatchObject({
+        providerFirstByteTimeoutMs: 2000,
+        providerIdleTimeoutMs: 10_000,
+        requestDeadlineMs: 15_000,
+      });
+    });
+
+    it('are configurable and bounded', () => {
+      const env = loadEnv({
+        ...base,
+        PROVIDER_FIRST_BYTE_TIMEOUT_MS: '500',
+        PROVIDER_IDLE_TIMEOUT_MS: '2000',
+        REQUEST_DEADLINE_MS: '4000',
+      });
+      expect(env).toMatchObject({
+        providerFirstByteTimeoutMs: 500,
+        providerIdleTimeoutMs: 2000,
+        requestDeadlineMs: 4000,
+      });
+      expect(() => loadEnv({ ...base, PROVIDER_FIRST_BYTE_TIMEOUT_MS: '5' })).toThrow(
+        /PROVIDER_FIRST_BYTE_TIMEOUT_MS/,
+      );
+      expect(() => loadEnv({ ...base, REQUEST_DEADLINE_MS: 'soon' })).toThrow(
+        /REQUEST_DEADLINE_MS/,
+      );
+    });
+
+    it('reject a first-byte timeout longer than the whole-request deadline', () => {
+      expect(() =>
+        loadEnv({ ...base, PROVIDER_FIRST_BYTE_TIMEOUT_MS: '9000', REQUEST_DEADLINE_MS: '5000' }),
+      ).toThrow(/must not exceed REQUEST_DEADLINE_MS/);
+    });
+  });
+
   describe('ADMIN_TOKEN', () => {
     it('is required', () => {
       expect(() => loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS })).toThrow(

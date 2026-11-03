@@ -10,6 +10,12 @@ export interface RequestLogEntry {
   requestedModel: string | null;
   /** The concrete model that was priced or served; `null` when the request was rejected early. */
   resolvedModel?: string | null;
+  /** The provider that was called (or last tried), once a provider call was made. */
+  resolvedProvider?: string | null;
+  /** A fallback model/provider (not the primary) served the request. */
+  fallback?: boolean;
+  /** Same-provider retries before the attempt that produced the outcome. */
+  retries?: number;
   status: LogStatus;
   httpStatus: number;
   errorCode: string | null;
@@ -40,14 +46,17 @@ function cleanText(value: string | null | undefined): string | null {
 export async function insertRequestLog(db: Queryable, entry: RequestLogEntry): Promise<void> {
   await db.query(
     `INSERT INTO request_logs
-       (request_id, key_id, requested_model, resolved_model, status, http_status, error_code,
-        prompt_tokens, completion_tokens, cost_usd, latency_ms)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+       (request_id, key_id, requested_model, resolved_model, resolved_provider, fallback, retries,
+        status, http_status, error_code, prompt_tokens, completion_tokens, cost_usd, latency_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       entry.requestId,
       entry.keyId,
       cleanText(entry.requestedModel),
       cleanText(entry.resolvedModel),
+      cleanText(entry.resolvedProvider),
+      entry.fallback ?? false,
+      entry.retries ?? 0,
       entry.status,
       entry.httpStatus,
       entry.errorCode,

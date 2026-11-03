@@ -11,6 +11,8 @@ import { fromSqlNumeric, formatUsd } from '../../src/money.js';
 import type { RedisClient } from '../../src/redis.js';
 import { checkRedis } from '../../src/redis.js';
 import { loadAllConfig } from '../../src/startup.js';
+import { FakeRegistry } from '../../src/providers/fake.js';
+import { TEST_TIMEOUTS } from '../helpers/app.js';
 import { DATA_DIR } from '../helpers/dataDir.js';
 import { freshPool } from '../helpers/testDb.js';
 import { deadRedis, freshRedis } from '../helpers/testRedis.js';
@@ -36,6 +38,8 @@ function appWith(limiterRedis: RedisClient = redis): FastifyInstance {
     requestLogs: createRequestLogWriter(pool),
     rateLimiter: new RedisRateLimiter(limiterRedis),
     budget: new PgBudgetStore(pool),
+    providers: new FakeRegistry(['alpha', 'beta']),
+    timeouts: TEST_TIMEOUTS,
     adminToken: 'test-admin-token-123',
     healthChecks: {
       postgres: async () => void (await pool.query('SELECT 1')),

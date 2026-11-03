@@ -6,6 +6,7 @@ import type { KeyStore } from './http/auth.js';
 import { toPrismError } from './http/errors.js';
 import type { BudgetStore } from './limits/budget.js';
 import type { RateLimiter } from './limits/rpm.js';
+import type { CallTimeouts, ProviderRegistry } from './providers/types.js';
 import { adminRoutes } from './routes/admin.js';
 import { chatRoutes } from './routes/chat.js';
 
@@ -23,6 +24,10 @@ export interface AppOptions {
   rateLimiter: RateLimiter;
   /** Monthly budget reserve → settle. */
   budget: BudgetStore;
+  /** Adapters for the providers named in the config. */
+  providers: ProviderRegistry;
+  /** Limits applied to every provider call. */
+  timeouts: CallTimeouts;
   /** The expected `x-admin-token` value for `/admin/*`. */
   adminToken: string;
   /**
@@ -140,6 +145,8 @@ export function buildApp(options: AppOptions): FastifyInstance {
       requestLogs: options.requestLogs,
       rateLimiter: options.rateLimiter,
       budget: options.budget,
+      providers: options.providers,
+      timeouts: options.timeouts,
       track,
     }),
   );

@@ -5,6 +5,7 @@ import { checkDatabase, createPool } from './db/pool.js';
 import { createRequestLogWriter } from './db/requestLogs.js';
 import { PgBudgetStore, reconcileStaleReservations } from './limits/budget.js';
 import { RedisRateLimiter } from './limits/rpm.js';
+import { createProviderRegistry } from './providers/registry.js';
 import { checkRedis, createRedis } from './redis.js';
 import { describeConfig, loadAllConfig, prepareDatabase, type LoadedConfig } from './startup.js';
 
@@ -49,6 +50,12 @@ async function main(): Promise<void> {
     requestLogs: createRequestLogWriter(pool),
     rateLimiter: new RedisRateLimiter(redis),
     budget: new PgBudgetStore(pool),
+    providers: createProviderRegistry(loaded.config),
+    timeouts: {
+      firstByteMs: env.providerFirstByteTimeoutMs,
+      idleMs: env.providerIdleTimeoutMs,
+      deadlineMs: env.requestDeadlineMs,
+    },
     adminToken: env.adminToken.reveal(),
     healthChecks: {
       postgres: () => checkDatabase(pool),
