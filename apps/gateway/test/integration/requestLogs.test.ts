@@ -5,9 +5,13 @@ import { findKeyByRawKey, seedTenants } from '../../src/db/keys.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { createPool, type Pool } from '../../src/db/pool.js';
 import { createRequestLogWriter } from '../../src/db/requestLogs.js';
+import { PgBudgetStore } from '../../src/limits/budget.js';
+import { RedisRateLimiter } from '../../src/limits/rpm.js';
+import type { RedisClient } from '../../src/redis.js';
 import { loadAllConfig } from '../../src/startup.js';
 import { DATA_DIR } from '../helpers/dataDir.js';
 import { freshPool } from '../helpers/testDb.js';
+import { freshRedis } from '../helpers/testRedis.js';
 
 const loaded = loadAllConfig({
   dataDir: DATA_DIR,
@@ -15,6 +19,7 @@ const loaded = loadAllConfig({
 });
 
 let pool: Pool;
+let redis: RedisClient;
 let app: FastifyInstance | undefined;
 
 function appFor(target: Pool): FastifyInstance {
@@ -23,6 +28,8 @@ function appFor(target: Pool): FastifyInstance {
     config: loaded.config,
     keys: { findByRawKey: (raw) => findKeyByRawKey(target, raw) },
     requestLogs: createRequestLogWriter(target),
+    rateLimiter: new RedisRateLimiter(redis),
+    budget: new PgBudgetStore(target),
     adminToken: 'test-admin-token-123',
   });
   return app;
@@ -30,7 +37,9 @@ function appFor(target: Pool): FastifyInstance {
 
 beforeEach(async () => {
   await pool?.end();
+  redis?.disconnect();
   pool = await freshPool();
+  redis = await freshRedis();
   await runMigrations(pool);
   await seedTenants(pool, loaded.tenants);
 });
@@ -42,6 +51,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await pool?.end();
+  redis?.disconnect();
 });
 
 const body = { model: 'fast', messages: [{ role: 'user', content: 'What is a message queue?' }] };
@@ -118,9 +128,9 @@ describe('end to end against Postgres: auth → validation → resolution → lo
       status: 'ok',
       http_status: 200,
       error_code: null,
-      cost_usd: '0.00000000',
       cache: 'miss',
     });
+    expect(Number(byId.get(ok.headers['x-request-id'] as string)?.cost_usd)).toBeGreaterThan(0);
     expect(byId.get(unauth.headers['x-request-id'] as string)).toMatchObject({
       key_id: null,
       requested_model: null,

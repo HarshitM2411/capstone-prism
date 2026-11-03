@@ -30,6 +30,8 @@ export class PrismError extends Error {
     readonly code: string,
     message: string,
     readonly logStatus: LogStatus,
+    /** Extra response headers, for example `Retry-After` on a 429. */
+    readonly headers: Record<string, string> = {},
   ) {
     super(message);
     this.name = 'PrismError';
@@ -72,6 +74,45 @@ export function modelNotFound(model: string): PrismError {
     'model_not_found',
     `The model "${model}" does not exist.`,
     'rejected_not_found',
+  );
+}
+
+export function modelNotAllowed(model: string): PrismError {
+  return new PrismError(
+    403,
+    'model_not_allowed',
+    'model_not_allowed',
+    `This API key is not allowed to use the model "${model}".`,
+    'rejected_allowlist',
+  );
+}
+
+export function rateLimitExceeded(retryAfterMs: number): PrismError {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  return new PrismError(
+    429,
+    'rate_limit_exceeded',
+    'rate_limit_exceeded',
+    'Rate limit exceeded for this API key. Retry after the interval in the Retry-After header.',
+    'rejected_rate_limit',
+    { 'retry-after': String(seconds) },
+  );
+}
+
+export function budgetExceeded(): PrismError {
+  return new PrismError(
+    402,
+    'budget_exceeded',
+    'budget_exceeded',
+    'The monthly budget for this API key is exhausted.',
+    'rejected_budget',
+  );
+}
+
+export function rateLimiterUnavailable(): PrismError {
+  return serviceUnavailable(
+    'Rate limiting is temporarily unavailable, so the request was not accepted. Please retry shortly.',
+    'rate_limiter_unavailable',
   );
 }
 

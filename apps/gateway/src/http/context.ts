@@ -13,8 +13,12 @@ export interface RequestContext {
   /** The authenticated tenant policy; `null` until authentication succeeds. */
   auth: AuthContext | null;
   requestedModel: string | null;
+  /** The concrete model that was priced or served, once known. */
+  resolvedModel: string | null;
   logStatus: LogStatus;
   errorCode: string | null;
+  /** The log row was already written (together with the budget settlement). */
+  logged: boolean;
 }
 
 declare module 'fastify' {

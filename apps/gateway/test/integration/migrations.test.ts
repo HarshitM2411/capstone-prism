@@ -29,6 +29,7 @@ describe('runMigrations', () => {
 
     expect(result.applied).toEqual(ALL_IDS);
     expect(await tableNames()).toEqual([
+      'budget_reservations',
       'budget_usage',
       'cache_entries',
       'request_logs',
@@ -242,5 +243,27 @@ describe('schema constraints', () => {
     await pool.query('DELETE FROM virtual_keys WHERE id = $1', [id]);
     const { rowCount } = await pool.query('SELECT 1 FROM budget_usage');
     expect(rowCount).toBe(0);
+  });
+
+  it('keeps one reservation per request and removes them with their key', async () => {
+    const id = await insertKey();
+    const insert = (): Promise<unknown> =>
+      pool.query(
+        `INSERT INTO budget_reservations (request_id, key_id, period, amount_usd)
+         VALUES ('11111111-1111-4111-8111-111111111111', $1, '2026-11', 5)`,
+        [id],
+      );
+    await insert();
+    await expect(insert()).rejects.toThrow(/unique|duplicate/);
+    await expect(
+      pool.query(
+        `INSERT INTO budget_reservations (request_id, key_id, period, amount_usd)
+         VALUES (gen_random_uuid(), $1, '2026-11', -1)`,
+        [id],
+      ),
+    ).rejects.toThrow(/check/);
+
+    await pool.query('DELETE FROM virtual_keys WHERE id = $1', [id]);
+    expect((await pool.query('SELECT 1 FROM budget_reservations')).rowCount).toBe(0);
   });
 });

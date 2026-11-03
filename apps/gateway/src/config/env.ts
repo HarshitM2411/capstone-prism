@@ -23,6 +23,10 @@ export interface Env {
   dataDir: string;
   /** File inside `dataDir` with the provider registry, aliases and retry policy. */
   gatewayConfigFile: string;
+  /** Redis connection string (rate-limit windows). Contains credentials, so never log it. */
+  redisUrl: string;
+  /** Per-command Redis timeout; on expiry the rate limiter fails closed (edge case 4.4). */
+  redisTimeoutMs: number;
   /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
   adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
@@ -68,6 +72,8 @@ function parseBoolean(source: NodeJS.ProcessEnv, name: string, fallback: boolean
 export interface LoadEnvOptions {
   /** The db CLI never serves requests, so it does not need the admin token. Default: required. */
   requireAdminToken?: boolean;
+  /** Likewise for Redis, which only the serving process uses. Default: required. */
+  requireRedis?: boolean;
 }
 
 const MIN_ADMIN_TOKEN_LENGTH = 8;
@@ -115,6 +121,23 @@ export function loadEnv(
     adminToken = new Secret(raw);
   }
 
+  let redisUrl = '';
+  if (options.requireRedis !== false) {
+    const raw = source.REDIS_URL?.trim() ?? '';
+    if (raw === '') throw new ConfigError('REDIS_URL is required (a redis:// connection string)');
+    let redisProtocol: string;
+    try {
+      redisProtocol = new URL(raw).protocol;
+    } catch {
+      // Deliberately do not echo the value: it may contain credentials.
+      throw new ConfigError('REDIS_URL is not a valid URL');
+    }
+    if (redisProtocol !== 'redis:' && redisProtocol !== 'rediss:') {
+      throw new ConfigError('REDIS_URL must start with redis:// or rediss://');
+    }
+    redisUrl = raw;
+  }
+
   const dataDir = source.DATA_DIR?.trim() || DEFAULT_DATA_DIR;
   const gatewayConfigFile = source.GATEWAY_CONFIG_FILE?.trim() || 'gateway_config.sample.json';
 
@@ -125,6 +148,8 @@ export function loadEnv(
     databaseUrl,
     dbPoolMax: parseInteger(source, 'DB_POOL_MAX', 10, 1, 200),
     dbConnectTimeoutMs: parseInteger(source, 'DB_CONNECT_TIMEOUT_MS', 5000, 100, 120_000),
+    redisUrl,
+    redisTimeoutMs: parseInteger(source, 'REDIS_TIMEOUT_MS', 500, 50, 10_000),
     adminToken,
     dataDir,
     gatewayConfigFile,

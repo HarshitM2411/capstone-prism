@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
+import { computeCostUnits, formatUsd } from '../src/money.js';
 import { readSampleRequests } from './helpers/dataDir.js';
-import { ADMIN_TOKEN, KEYS, buildTestApp, waitForLogs, type TestApp } from './helpers/app.js';
+import {
+  ADMIN_TOKEN,
+  KEYS,
+  buildTestApp,
+  config,
+  waitForLogs,
+  type TestApp,
+} from './helpers/app.js';
 
 let current: TestApp | undefined;
 
@@ -68,31 +76,43 @@ describe('POST /v1/chat/completions — success (stub)', () => {
       object: 'chat.completion',
       model: 'fast',
       choices: [{ index: 0, message: { role: 'assistant' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     });
     expect(body.choices[0].message.content).toBeTypeOf('string');
+    // The stub reports real, non-zero usage ('What is a message queue?' is 5 words) ...
+    expect(body.usage.prompt_tokens).toBe(5);
+    expect(body.usage.completion_tokens).toBeGreaterThan(20);
+    expect(body.usage.total_tokens).toBe(body.usage.prompt_tokens + body.usage.completion_tokens);
+    // ... priced at the `fast` primary (alpha-small): 0.15 / 0.60 USD per 1M tokens.
+    const expectedUnits = computeCostUnits(
+      body.usage.prompt_tokens,
+      body.usage.completion_tokens,
+      config.models.get('alpha-small')!,
+    );
+    expect(res.headers['x-prism-cost-usd']).toBe(formatUsd(expectedUnits));
+    expect(expectedUnits).toBeGreaterThan(0n);
     expect(res.headers['x-prism-provider']).toBe('none');
     expect(res.headers['x-prism-cache']).toBe('miss');
     expect(res.headers['x-prism-fallback']).toBe('false');
-    expect(res.headers['x-prism-cost-usd']).toBe('0');
   });
 
-  it.each(['fast', 'smart', 'auto', 'alpha-small', 'beta-large'])(
-    'accepts the known model name "%s"',
-    async (model) => {
-      const res = await post(start(), { body: { ...valid, model } });
-      expect(res.statusCode).toBe(200);
-      await current?.app.close();
-    },
-  );
+  it.each(['fast', 'smart', 'auto'])('accepts the allowed model name "%s"', async (model) => {
+    const res = await post(start(), { key: KEYS.research, body: { ...valid, model } });
+    expect(res.statusCode).toBe(200);
+    await current?.app.close();
+  });
 
   it('accepts every valid starter sample request (the negative ones are rejected, with the right code)', async () => {
     const t = start();
     for (const sample of readSampleRequests()) {
-      const res = await post(t, { body: sample.body });
-      if (sample.id === 'req_malformed') expect(res.statusCode, sample.id).toBe(400);
-      else if (sample.id === 'req_unknown_model') expect(res.statusCode, sample.id).toBe(404);
-      else expect(res.statusCode, sample.id).toBe(200);
+      // `req_not_allowed` must be tried with a key that only allows `fast`; the rest with `research`.
+      const key = sample.id === 'req_not_allowed' ? KEYS.search : KEYS.research;
+      const res = await post(t, { key, body: sample.body });
+      const expected: Record<string, number> = {
+        req_malformed: 400,
+        req_unknown_model: 404,
+        req_not_allowed: 403,
+      };
+      expect(res.statusCode, sample.id).toBe(expected[sample.id] ?? 200);
       expectHeaderContract(res, { cost: !(sample.body.stream === true) });
     }
   });
@@ -129,11 +149,34 @@ describe('POST /v1/chat/completions — success (stub)', () => {
     expect(t.logs.entries[0]).toMatchObject({
       keyId: 2,
       requestedModel: 'fast',
+      resolvedModel: 'alpha-small',
       status: 'ok',
       httpStatus: res.statusCode,
       errorCode: null,
+      promptTokens: 5,
     });
+    expect(t.logs.entries[0]?.completionTokens).toBeGreaterThan(20);
+    expect(t.logs.entries[0]?.costUnits).toBeGreaterThan(0n);
     expect(t.logs.entries[0]?.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('charges the log cost to the budget: spent equals the logged cost (edge case 5.5)', async () => {
+    const t = start();
+    await post(t);
+    await post(t);
+    await waitForLogs(t.logs, 2);
+
+    const logged = t.logs.entries.reduce((sum, e) => sum + (e.costUnits ?? 0n), 0n);
+    expect(t.budget.spent.get(1)).toBe(logged);
+    expect(t.budget.reserved.get(1)).toBe(0n); // nothing left in flight
+  });
+
+  it('charges a streamed response too, although it has no cost header', async () => {
+    const t = start();
+    const res = await post(t, { body: { ...valid, stream: true } });
+    expect(res.headers['x-prism-cost-usd']).toBeUndefined();
+    expect(t.budget.spent.get(1)).toBeGreaterThan(0n);
+    expect(t.budget.reserved.get(1)).toBe(0n);
   });
 });
 
@@ -397,8 +440,9 @@ describe('request logging (every path)', () => {
         },
       },
     });
-    const res = await post(t);
-    expect(res.statusCode).toBe(200);
+    // A rejection is logged by the `onResponse` writer; its failure must not reach the client.
+    const res = await post(t, { key: 'prism-sk-unknown-000000' });
+    expect(res.statusCode).toBe(401);
     await t.app.close(); // shutdown still completes even though the write failed
   });
 
@@ -412,7 +456,7 @@ describe('request logging (every path)', () => {
         },
       },
     });
-    await post(t);
+    await post(t, { key: 'prism-sk-unknown-000000' });
     await t.app.close();
     expect(written).toHaveLength(1);
   });

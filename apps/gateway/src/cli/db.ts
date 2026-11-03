@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   let env;
   let loaded;
   try {
-    env = loadEnv(process.env, { requireAdminToken: false });
+    env = loadEnv(process.env, { requireAdminToken: false, requireRedis: false });
     loaded = loadAllConfig(env);
   } catch (err) {
     if (err instanceof ConfigError) {

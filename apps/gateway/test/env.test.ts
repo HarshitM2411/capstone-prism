@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError, loadEnv } from '../src/config/env.js';
 
 const DB = 'postgres://prism:s3cret-pw@localhost:5432/prism';
-const base = { DATABASE_URL: DB, ADMIN_TOKEN: 'demo-admin-token' };
+const REDIS = 'redis://:r3dis-pw@localhost:6379';
+const base = { DATABASE_URL: DB, ADMIN_TOKEN: 'demo-admin-token', REDIS_URL: REDIS };
 
 describe('loadEnv', () => {
   it('uses defaults when only the required values are set', () => {
@@ -27,9 +28,50 @@ describe('loadEnv', () => {
     expect(JSON.stringify(adminToken)).not.toContain('demo-admin-token');
   });
 
+  describe('REDIS_URL / REDIS_TIMEOUT_MS', () => {
+    it('is required and defaults the command timeout to 500 ms', () => {
+      expect(loadEnv(base)).toMatchObject({ redisUrl: REDIS, redisTimeoutMs: 500 });
+      expect(() => loadEnv({ DATABASE_URL: DB, ADMIN_TOKEN: base.ADMIN_TOKEN })).toThrow(
+        /REDIS_URL is required/,
+      );
+      expect(() => loadEnv({ ...base, REDIS_URL: '  ' })).toThrow(/REDIS_URL is required/);
+    });
+
+    it('is optional for the db CLI', () => {
+      expect(() =>
+        loadEnv({ DATABASE_URL: DB, ADMIN_TOKEN: base.ADMIN_TOKEN }, { requireRedis: false }),
+      ).not.toThrow();
+    });
+
+    it('accepts redis:// and rediss:// only', () => {
+      expect(() => loadEnv({ ...base, REDIS_URL: 'rediss://cache.example:6380' })).not.toThrow();
+      expect(() => loadEnv({ ...base, REDIS_URL: 'http://localhost:6379' })).toThrow(/redis:\/\//);
+      expect(() => loadEnv({ ...base, REDIS_URL: 'not a url' })).toThrow(/not a valid URL/);
+    });
+
+    it('never echoes the URL (it may carry a password) in an error', () => {
+      for (const bad of ['http://:r3dis-pw@localhost:6379', 'r3dis-pw not a url']) {
+        try {
+          loadEnv({ ...base, REDIS_URL: bad });
+          expect.unreachable();
+        } catch (err) {
+          expect((err as Error).message).not.toContain('r3dis-pw');
+        }
+      }
+    });
+
+    it('bounds the command timeout', () => {
+      expect(loadEnv({ ...base, REDIS_TIMEOUT_MS: '250' }).redisTimeoutMs).toBe(250);
+      expect(() => loadEnv({ ...base, REDIS_TIMEOUT_MS: '5' })).toThrow(/REDIS_TIMEOUT_MS/);
+      expect(() => loadEnv({ ...base, REDIS_TIMEOUT_MS: 'abc' })).toThrow(/REDIS_TIMEOUT_MS/);
+    });
+  });
+
   describe('ADMIN_TOKEN', () => {
     it('is required', () => {
-      expect(() => loadEnv({ DATABASE_URL: DB })).toThrow(/ADMIN_TOKEN is required/);
+      expect(() => loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS })).toThrow(
+        /ADMIN_TOKEN is required/,
+      );
       expect(() => loadEnv({ ...base, ADMIN_TOKEN: '   ' })).toThrow(/ADMIN_TOKEN is required/);
     });
 
@@ -43,7 +85,9 @@ describe('loadEnv', () => {
     });
 
     it('is optional for the db CLI', () => {
-      expect(() => loadEnv({ DATABASE_URL: DB }, { requireAdminToken: false })).not.toThrow();
+      expect(() =>
+        loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS }, { requireAdminToken: false }),
+      ).not.toThrow();
     });
   });
 

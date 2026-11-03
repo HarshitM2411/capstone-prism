@@ -108,4 +108,20 @@ ALTER TABLE request_logs ADD CONSTRAINT request_logs_status_check CHECK (status 
   'client_disconnect', 'internal_error'));
 `,
   },
+  {
+    id: '003_budget_reservations',
+    // One row per in-flight reservation. Settling deletes the row, which makes settlement
+    // idempotent (a reservation can never be released twice) and lets a periodic job find
+    // reservations that were never released, for example after a crash (edge case 5.7).
+    sql: `
+CREATE TABLE budget_reservations (
+  request_id UUID        PRIMARY KEY,
+  key_id     BIGINT      NOT NULL REFERENCES virtual_keys(id) ON DELETE CASCADE,
+  period     TEXT        NOT NULL,
+  amount_usd NUMERIC(20,8) NOT NULL CHECK (amount_usd >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX budget_reservations_created_idx ON budget_reservations (created_at);
+`,
+  },
 ];

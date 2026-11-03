@@ -4,6 +4,8 @@ import type { GatewayConfig } from './config/gatewayConfig.js';
 import type { RequestLogWriter } from './db/requestLogs.js';
 import type { KeyStore } from './http/auth.js';
 import { toPrismError } from './http/errors.js';
+import type { BudgetStore } from './limits/budget.js';
+import type { RateLimiter } from './limits/rpm.js';
 import { adminRoutes } from './routes/admin.js';
 import { chatRoutes } from './routes/chat.js';
 
@@ -17,6 +19,10 @@ export interface AppOptions {
   keys: KeyStore;
   /** Writes one `request_logs` row per data-plane request. */
   requestLogs: RequestLogWriter;
+  /** Per-key requests-per-minute limiter (Redis sliding window). */
+  rateLimiter: RateLimiter;
+  /** Monthly budget reserve → settle. */
+  budget: BudgetStore;
   /** The expected `x-admin-token` value for `/admin/*`. */
   adminToken: string;
   /**
@@ -88,6 +94,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       request.prism.logStatus = error.logStatus;
       request.prism.errorCode = error.code;
     }
+    for (const [name, value] of Object.entries(error.headers)) reply.header(name, value);
     return reply.code(error.httpStatus).send(error.toEnvelope());
   });
 
@@ -131,6 +138,8 @@ export function buildApp(options: AppOptions): FastifyInstance {
       config: options.config,
       keys: options.keys,
       requestLogs: options.requestLogs,
+      rateLimiter: options.rateLimiter,
+      budget: options.budget,
       track,
     }),
   );
