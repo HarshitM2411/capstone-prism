@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError, loadEnv } from '../src/config/env.js';
 
 const DB = 'postgres://prism:s3cret-pw@localhost:5432/prism';
-const base = { DATABASE_URL: DB };
+const base = { DATABASE_URL: DB, ADMIN_TOKEN: 'demo-admin-token' };
 
 describe('loadEnv', () => {
   it('uses defaults when only the required values are set', () => {
@@ -18,6 +18,32 @@ describe('loadEnv', () => {
       dbConnectTimeoutMs: 5000,
       gatewayConfigFile: 'gateway_config.sample.json',
       seedOnStart: true,
+    });
+  });
+
+  it('reads the admin token as a redacted secret', () => {
+    const { adminToken } = loadEnv(base);
+    expect(adminToken.reveal()).toBe('demo-admin-token');
+    expect(JSON.stringify(adminToken)).not.toContain('demo-admin-token');
+  });
+
+  describe('ADMIN_TOKEN', () => {
+    it('is required', () => {
+      expect(() => loadEnv({ DATABASE_URL: DB })).toThrow(/ADMIN_TOKEN is required/);
+      expect(() => loadEnv({ ...base, ADMIN_TOKEN: '   ' })).toThrow(/ADMIN_TOKEN is required/);
+    });
+
+    it('must be reasonably long, and the message does not echo it', () => {
+      expect(() => loadEnv({ ...base, ADMIN_TOKEN: 'short' })).toThrow(/at least 8/);
+      try {
+        loadEnv({ ...base, ADMIN_TOKEN: 'short' });
+      } catch (err) {
+        expect((err as Error).message).not.toContain('short');
+      }
+    });
+
+    it('is optional for the db CLI', () => {
+      expect(() => loadEnv({ DATABASE_URL: DB }, { requireAdminToken: false })).not.toThrow();
     });
   });
 
@@ -65,7 +91,9 @@ describe('loadEnv', () => {
 
   describe('DATABASE_URL', () => {
     it('is required', () => {
-      expect(() => loadEnv({})).toThrow(/DATABASE_URL is required/);
+      expect(() => loadEnv({ ADMIN_TOKEN: 'demo-admin-token' })).toThrow(
+        /DATABASE_URL is required/,
+      );
       expect(() => loadEnv({ DATABASE_URL: '  ' })).toThrow(/DATABASE_URL is required/);
     });
 
@@ -78,7 +106,7 @@ describe('loadEnv', () => {
     });
 
     it('accepts the postgresql:// scheme too', () => {
-      expect(loadEnv({ DATABASE_URL: 'postgresql://u:p@h/db' }).databaseUrl).toContain(
+      expect(loadEnv({ ...base, DATABASE_URL: 'postgresql://u:p@h/db' }).databaseUrl).toContain(
         'postgresql',
       );
     });

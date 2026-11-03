@@ -80,15 +80,17 @@ This plan breaks the build into phases. Each phase has a goal, concrete tasks, a
 
 **Goal:** `POST /v1/chat/completions` exists, authenticates, validates shape, and logs — but just echoes/stubs the response (no provider call yet).
 
-- [ ] Fastify route + JSON schema validation for the OpenAI-compatible request body (empty `messages` → `400`, per the starter's `req_malformed`), with a body-size limit.
-- [ ] Auth middleware: resolve the virtual key by hash → `{ keyId, team, allowedModels, rpmLimit, monthlyBudgetUsd, cache config }`; reject missing/unknown/malformed/disabled keys with `401` (`authentication_error` / `invalid_api_key`). Auth runs first, validation second.
-- [ ] Unknown model or alias → `404` (`not_found_error` / `model_not_found`).
-- [ ] Shared error envelope `{ error: { message, type, code } }` used by every rejection path from here on (architecture.md §6).
-- [ ] `x-prism-*` response headers (`x-prism-provider`, `x-prism-cache`, `x-prism-fallback`, `x-prism-cost-usd`) wired through **one** helper with default values, so every code path emits them from day one.
-- [ ] Minimal request-log write on **every** path, including rejections (unknown key → null key), with the `status` enum. Completeness is verified in Phase 9.
-- [ ] Admin plane skeleton: `x-admin-token` check (`ADMIN_TOKEN` env), used by the `/admin/*` routes added later.
+- [x] Fastify route + JSON schema validation for the OpenAI-compatible request body (empty `messages` → `400`, per the starter's `req_malformed`), with a body-size limit.
+- [x] Auth middleware: resolve the virtual key by hash → `{ keyId, team, allowedModels, rpmLimit, monthlyBudgetUsd, cache config }`; reject missing/unknown/malformed/disabled keys with `401` (`authentication_error` / `invalid_api_key`). Auth runs first, validation second.
+- [x] Unknown model or alias → `404` (`not_found_error` / `model_not_found`).
+- [x] Shared error envelope `{ error: { message, type, code } }` used by every rejection path from here on (architecture.md §6).
+- [x] `x-prism-*` response headers (`x-prism-provider`, `x-prism-cache`, `x-prism-fallback`, `x-prism-cost-usd`) wired through **one** helper with default values, so every code path emits them from day one.
+- [x] Minimal request-log write on **every** path, including rejections (unknown key → null key), with the `status` enum. Completeness is verified in Phase 9.
+- [x] Admin plane skeleton: `x-admin-token` check (`ADMIN_TOKEN` env), used by the `/admin/*` routes added later.
 
 **Exit criteria:** Valid key + valid body → 200 stub response with the full header contract present. Invalid/missing key → `401`; empty `messages` → `400`; unknown model → `404`; each with the standard error body and each logged. Tests for all of these paths.
+
+**Status: complete.** Notes: validation is hand-written (not a JSON schema) so every problem is reported in one message and the response always uses our envelope; authentication runs in the route's `onRequest` hook, before the body is parsed, so a bad key plus a bad body is always `401`. Beyond the plan: framework parse errors map to `400 invalid_json`, `413 request_too_large` and `415 unsupported_media_type` (all logged as `rejected_validation`); unsupported OpenAI parameters (`tools`, `n > 1`, `logprobs`, ...) are rejected instead of silently dropped (resolves P2); migration `002` adds an `internal_error` log status; `GET /admin/ping` is the only admin route until Phases 9-10. The `200` response is a stub (it also covers `stream: true` with a short SSE body) that Phase 4 and Phase 6 replace; allowlist, rate limit and budget checks arrive in Phase 3.
 
 ---
 

@@ -1,9 +1,24 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
+import Fastify, { LogController, type FastifyInstance } from 'fastify';
+import type { GatewayConfig } from './config/gatewayConfig.js';
+import type { RequestLogWriter } from './db/requestLogs.js';
+import type { KeyStore } from './http/auth.js';
+import { toPrismError } from './http/errors.js';
+import { adminRoutes } from './routes/admin.js';
+import { chatRoutes } from './routes/chat.js';
 
 export type HealthCheck = () => Promise<void>;
 
 export interface AppOptions {
   logLevel?: string;
+  /** Validated gateway configuration (aliases, models, providers). */
+  config: GatewayConfig;
+  /** Resolves a raw virtual key to its tenant. */
+  keys: KeyStore;
+  /** Writes one `request_logs` row per data-plane request. */
+  requestLogs: RequestLogWriter;
+  /** The expected `x-admin-token` value for `/admin/*`. */
+  adminToken: string;
   /**
    * Named dependency probes for `/health` (for example `{ postgres: () => checkDatabase(pool) }`).
    * Each resolves when the dependency answers and rejects when it does not.
@@ -12,18 +27,79 @@ export interface AppOptions {
 }
 
 /**
- * Builds the Fastify application. Kept separate from `index.ts` so tests can
- * exercise the app in-process (`app.inject`) without opening a socket.
- *
- * Phase 1 exposes `GET /health`, which reports dependency state. The data plane and admin
- * plane arrive in later phases.
+ * Builds the Fastify application. Kept separate from `index.ts` so tests can exercise the app
+ * in-process (`app.inject`) without opening a socket.
  */
-export function buildApp(options: AppOptions = {}): FastifyInstance {
+export function buildApp(options: AppOptions): FastifyInstance {
   const app = Fastify({
     logger: { level: options.logLevel ?? 'info' },
     // Reject oversized bodies before any work is done (edge case 1.5).
     bodyLimit: 1024 * 1024,
+    // One line per request is written by us (below), without the noisy health probes.
+    logController: new LogController({ disableRequestLogging: true }),
+    // Ids are always generated here; a client-supplied id is never trusted or logged.
+    genReqId: () => randomUUID(),
+    requestIdHeader: false,
   });
+
+  // JSON only: Fastify also parses text/plain by default, which would turn a wrong Content-Type
+  // into a confusing validation error instead of a clear 415.
+  app.removeContentTypeParser('text/plain');
+
+  app.decorateRequest('prism', null);
+
+  // Background work (request-log writes) that shutdown must wait for.
+  const pending = new Set<Promise<unknown>>();
+  const track = (work: Promise<unknown>): void => {
+    pending.add(work);
+    void work.finally(() => pending.delete(work));
+  };
+  app.addHook('onClose', async () => {
+    await Promise.allSettled([...pending]);
+  });
+
+  // The client can quote this id when reporting a problem; it is also the request log's id.
+  app.addHook('onSend', async (request, reply, payload) => {
+    reply.header('x-request-id', request.id);
+    return payload;
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    if (request.url === '/health') return;
+    request.log.info(
+      {
+        method: request.method,
+        path: request.url.split('?')[0],
+        statusCode: reply.statusCode,
+        durationMs: Math.round(reply.elapsedTime),
+        keyId: request.prism?.keyId ?? null,
+      },
+      'request completed',
+    );
+  });
+
+  // Every failure — ours or the framework's — leaves as the standard envelope.
+  app.setErrorHandler((err, request, reply) => {
+    const error = toPrismError(err);
+    if (error.httpStatus >= 500) {
+      request.log.error({ err, reqId: request.id }, 'request failed');
+    }
+    if (request.prism !== null) {
+      request.prism.logStatus = error.logStatus;
+      request.prism.errorCode = error.code;
+    }
+    return reply.code(error.httpStatus).send(error.toEnvelope());
+  });
+
+  app.setNotFoundHandler((_request, reply) =>
+    reply.code(404).send({
+      error: {
+        message: 'Route not found.',
+        type: 'not_found_error',
+        code: 'route_not_found',
+      },
+    }),
+  );
 
   const healthChecks = options.healthChecks ?? {};
 
@@ -49,6 +125,16 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
       dependencies,
     });
   });
+
+  void app.register(
+    chatRoutes({
+      config: options.config,
+      keys: options.keys,
+      requestLogs: options.requestLogs,
+      track,
+    }),
+  );
+  void app.register(adminRoutes({ adminToken: options.adminToken }));
 
   return app;
 }

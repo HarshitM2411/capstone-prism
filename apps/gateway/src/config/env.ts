@@ -7,6 +7,7 @@
  * error messages never echo a secret value back.
  */
 import { fileURLToPath } from 'node:url';
+import { Secret } from '../secret.js';
 
 export interface Env {
   port: number;
@@ -22,6 +23,8 @@ export interface Env {
   dataDir: string;
   /** File inside `dataDir` with the provider registry, aliases and retry policy. */
   gatewayConfigFile: string;
+  /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
+  adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
   seedOnStart: boolean;
 }
@@ -62,7 +65,17 @@ function parseBoolean(source: NodeJS.ProcessEnv, name: string, fallback: boolean
   throw new ConfigError(`${name} must be true or false (got "${raw}")`);
 }
 
-export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+export interface LoadEnvOptions {
+  /** The db CLI never serves requests, so it does not need the admin token. Default: required. */
+  requireAdminToken?: boolean;
+}
+
+const MIN_ADMIN_TOKEN_LENGTH = 8;
+
+export function loadEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  options: LoadEnvOptions = {},
+): Env {
   const port = parseInteger(source, 'PORT', 8080, 1, 65535);
 
   const logLevel = source.LOG_LEVEL ?? 'info';
@@ -90,6 +103,18 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new ConfigError('DATABASE_URL must start with postgres:// or postgresql://');
   }
 
+  let adminToken = new Secret('');
+  if (options.requireAdminToken !== false) {
+    const raw = source.ADMIN_TOKEN?.trim() ?? '';
+    if (raw === '') {
+      throw new ConfigError('ADMIN_TOKEN is required (it protects the /admin routes)');
+    }
+    if (raw.length < MIN_ADMIN_TOKEN_LENGTH) {
+      throw new ConfigError(`ADMIN_TOKEN must be at least ${MIN_ADMIN_TOKEN_LENGTH} characters`);
+    }
+    adminToken = new Secret(raw);
+  }
+
   const dataDir = source.DATA_DIR?.trim() || DEFAULT_DATA_DIR;
   const gatewayConfigFile = source.GATEWAY_CONFIG_FILE?.trim() || 'gateway_config.sample.json';
 
@@ -100,6 +125,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     databaseUrl,
     dbPoolMax: parseInteger(source, 'DB_POOL_MAX', 10, 1, 200),
     dbConnectTimeoutMs: parseInteger(source, 'DB_CONNECT_TIMEOUT_MS', 5000, 100, 120_000),
+    adminToken,
     dataDir,
     gatewayConfigFile,
     seedOnStart: parseBoolean(source, 'SEED_ON_START', true),

@@ -286,7 +286,7 @@ These were open earlier and are now decided, by the starter contract or by you.
 | # | Item | Related cases | Default |
 |---|---|---|---|
 | P1 | Reconciliation of stale reservations after a crash | 5.7, 11.9 | Clear reservations older than the request deadline at startup and periodically |
-| P2 | Behavior on unsupported OpenAI parameters | 1.7 | Pass through where supported, otherwise reject clearly |
+| P2 | Behavior on unsupported OpenAI parameters | 1.7 | Pass through where supported, otherwise reject clearly. **Done in Phase 2:** `tools`, `tool_choice`, `functions`, `response_format`, `logit_bias`, `logprobs`, `n > 1` and similar return `400` |
 | P3 | Behavior when the request-log write fails | 10.3 | Do not fail the client response; emit an error metric |
 | P4 | Time-sensitive prompt heuristic | 7.11 | A small keyword list (`current`, `now`, `today`, `latest`, `status`) |
 

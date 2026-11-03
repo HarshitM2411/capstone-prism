@@ -95,4 +95,17 @@ CREATE TABLE cache_entries (
 CREATE INDEX cache_entries_scope_idx ON cache_entries (key_id, alias, context_hash);
 `,
   },
+  {
+    id: '002_request_log_internal_error',
+    // An unexpected failure (a bug) is logged as its own status instead of being mislabeled
+    // as an upstream or availability problem.
+    sql: `
+ALTER TABLE request_logs DROP CONSTRAINT request_logs_status_check;
+ALTER TABLE request_logs ADD CONSTRAINT request_logs_status_check CHECK (status IN (
+  'ok', 'cache_hit', 'rejected_auth', 'rejected_validation',
+  'rejected_not_found', 'rejected_allowlist', 'rejected_rate_limit',
+  'rejected_budget', 'rejected_unavailable', 'upstream_error',
+  'client_disconnect', 'internal_error'));
+`,
+  },
 ];

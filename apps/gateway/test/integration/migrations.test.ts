@@ -5,6 +5,7 @@ import { verifyVectorExtension, type Pool } from '../../src/db/pool.js';
 import { freshPool } from '../helpers/testDb.js';
 
 let pool: Pool;
+const ALL_IDS = migrations.map((m) => m.id);
 
 beforeEach(async () => {
   await pool?.end();
@@ -26,7 +27,7 @@ describe('runMigrations', () => {
   it('creates the schema on an empty database', async () => {
     const result = await runMigrations(pool);
 
-    expect(result.applied).toEqual(['001_initial_schema']);
+    expect(result.applied).toEqual(ALL_IDS);
     expect(await tableNames()).toEqual([
       'budget_usage',
       'cache_entries',
@@ -52,7 +53,7 @@ describe('runMigrations', () => {
     const second = await runMigrations(pool);
 
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toEqual(['001_initial_schema']);
+    expect(second.alreadyApplied).toEqual(ALL_IDS);
   });
 
   it('applies each migration exactly once when several instances start together (edge case 11.4)', async () => {
@@ -63,9 +64,9 @@ describe('runMigrations', () => {
     ]);
 
     const applied = results.flatMap((r) => r.applied);
-    expect(applied).toEqual(['001_initial_schema']);
+    expect(applied.sort()).toEqual([...ALL_IDS].sort());
     const { rows } = await pool.query('SELECT id FROM schema_migrations');
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(ALL_IDS.length);
   });
 
   it('refuses to continue when an applied migration was edited', async () => {
@@ -100,7 +101,7 @@ describe('runMigrations', () => {
 
     expect(await tableNames()).toContain('virtual_keys');
     const { rows } = await pool.query('SELECT id FROM schema_migrations');
-    expect(rows.map((r) => r.id)).toEqual(['001_initial_schema']);
+    expect(rows.map((r) => r.id)).toEqual(ALL_IDS);
     // The lock was released, so a later run can proceed.
     await expect(runMigrations(pool, migrations)).resolves.toMatchObject({ applied: [] });
   });
@@ -172,6 +173,27 @@ describe('schema constraints', () => {
     );
     const { rows } = await pool.query('SELECT key_id, cost_usd, cache FROM request_logs');
     expect(rows[0]).toEqual({ key_id: null, cost_usd: '0.00000000', cache: 'miss' });
+  });
+
+  it('accepts every status the gateway can log, including internal_error', async () => {
+    for (const status of [
+      'ok',
+      'cache_hit',
+      'rejected_auth',
+      'rejected_validation',
+      'rejected_not_found',
+      'rejected_allowlist',
+      'rejected_rate_limit',
+      'rejected_budget',
+      'rejected_unavailable',
+      'upstream_error',
+      'client_disconnect',
+      'internal_error',
+    ]) {
+      await pool.query('INSERT INTO request_logs (status) VALUES ($1)', [status]);
+    }
+    const { rowCount } = await pool.query('SELECT 1 FROM request_logs');
+    expect(rowCount).toBe(12);
   });
 
   it('rejects an unknown request status', async () => {

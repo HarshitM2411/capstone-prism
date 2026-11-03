@@ -1,6 +1,8 @@
 import { buildApp } from './app.js';
 import { ConfigError, loadEnv, type Env } from './config/env.js';
+import { findKeyByRawKey } from './db/keys.js';
 import { checkDatabase, createPool } from './db/pool.js';
+import { createRequestLogWriter } from './db/requestLogs.js';
 import { describeConfig, loadAllConfig, prepareDatabase, type LoadedConfig } from './startup.js';
 
 function fatal(message: string): never {
@@ -28,6 +30,10 @@ async function main(): Promise<void> {
   });
   const app = buildApp({
     logLevel: env.logLevel,
+    config: loaded.config,
+    keys: { findByRawKey: (rawKey) => findKeyByRawKey(pool, rawKey) },
+    requestLogs: createRequestLogWriter(pool),
+    adminToken: env.adminToken.reveal(),
     healthChecks: { postgres: () => checkDatabase(pool) },
   });
 

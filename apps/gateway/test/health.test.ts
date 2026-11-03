@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { buildApp, type AppOptions } from '../src/app.js';
+import type { AppOptions } from '../src/app.js';
+import { buildTestApp } from './helpers/app.js';
 
 describe('GET /health', () => {
   let app: FastifyInstance;
 
-  function start(options: AppOptions = {}): FastifyInstance {
-    app = buildApp({ logLevel: 'silent', ...options });
+  function start(options: Partial<AppOptions> = {}): FastifyInstance {
+    app = buildTestApp(options).app;
     return app;
   }
 
@@ -68,8 +69,11 @@ describe('GET /health', () => {
     expect(res.json().dependencies).toEqual({ postgres: 'up', redis: 'down' });
   });
 
-  it('returns 404 for routes that do not exist yet', async () => {
-    const res = await start().inject({ method: 'GET', url: '/nope' });
-    expect(res.statusCode).toBe(404);
+  it('is not written to the request log (it is not a data-plane request)', async () => {
+    const { app: instance, logs } = buildTestApp();
+    app = instance;
+    await instance.inject({ method: 'GET', url: '/health' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(logs.entries).toHaveLength(0);
   });
 });
