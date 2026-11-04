@@ -53,6 +53,8 @@ export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   stream: boolean;
+  /** `stream_options.include_usage`: send a final usage chunk to the client. */
+  includeUsage: boolean;
   /** `max_completion_tokens` if given, else `max_tokens`; used later for budget estimates. */
   maxTokens: number | null;
   params: PassThroughParams;
@@ -131,12 +133,13 @@ export function validateChatRequest(body: unknown): ValidationResult {
     if (typeof body.stream === 'boolean') stream = body.stream;
     else problems.push('"stream" must be a boolean');
   }
-  if (
-    body.stream_options !== undefined &&
-    body.stream_options !== null &&
-    !isObject(body.stream_options)
-  ) {
-    problems.push('"stream_options" must be an object');
+  let includeUsage = false;
+  if (body.stream_options !== undefined && body.stream_options !== null) {
+    if (!isObject(body.stream_options)) {
+      problems.push('"stream_options" must be an object');
+    } else if (body.stream_options.include_usage === true) {
+      includeUsage = true;
+    }
   }
 
   // sampling parameters
@@ -207,5 +210,5 @@ export function validateChatRequest(body: unknown): ValidationResult {
   if (problems.length > 0) {
     return { ok: false, message: `Invalid request: ${problems.join('; ')}.` };
   }
-  return { ok: true, request: { model, messages, stream, maxTokens, params } };
+  return { ok: true, request: { model, messages, stream, includeUsage, maxTokens, params } };
 }

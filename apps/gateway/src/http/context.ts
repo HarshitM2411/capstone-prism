@@ -23,8 +23,12 @@ export interface RequestContext {
   retries: number;
   logStatus: LogStatus;
   errorCode: string | null;
-  /** The log row was already written (together with the budget settlement). */
+  /** The log row was already written (together with the budget settlement), or is owned elsewhere. */
   logged: boolean;
+  /** The connection closed before the response was fully sent. */
+  clientGone: boolean;
+  /** The handler produced its response (success or error) and handed it to the transport. */
+  responseReady: boolean;
 }
 
 declare module 'fastify' {

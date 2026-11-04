@@ -9,8 +9,9 @@ import { createProviderRegistry } from './providers/registry.js';
 import { checkRedis, createRedis } from './redis.js';
 import { describeConfig, loadAllConfig, prepareDatabase, type LoadedConfig } from './startup.js';
 
-/** Reservations older than this belong to requests that can no longer be in flight. */
-const STALE_RESERVATION_MS = 120_000;
+/** A reservation can be older than this only if its request died with the process. */
+const STALE_RESERVATION_MARGIN_MS = 30_000;
+const MIN_STALE_RESERVATION_MS = 120_000;
 const RECONCILE_INTERVAL_MS = 60_000;
 
 function fatal(message: string): never {
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
       idleMs: env.providerIdleTimeoutMs,
       deadlineMs: env.requestDeadlineMs,
     },
+    streamMaxMs: env.streamMaxDurationMs,
     adminToken: env.adminToken.reveal(),
     healthChecks: {
       postgres: () => checkDatabase(pool),
@@ -74,9 +76,14 @@ async function main(): Promise<void> {
   }
 
   // 3. Release budget holds that were never settled (a crash mid-request), now and periodically.
+  // A hold can legitimately live as long as the longest stream, so the cutoff sits above it.
+  const staleAfterMs = Math.max(
+    MIN_STALE_RESERVATION_MS,
+    env.streamMaxDurationMs + STALE_RESERVATION_MARGIN_MS,
+  );
   const reconcile = async (): Promise<void> => {
     try {
-      const cleared = await reconcileStaleReservations(pool, STALE_RESERVATION_MS);
+      const cleared = await reconcileStaleReservations(pool, staleAfterMs);
       if (cleared > 0) app.log.warn({ cleared }, 'released stale budget reservations');
     } catch (err) {
       app.log.error({ err }, 'budget reservation reconciliation failed');

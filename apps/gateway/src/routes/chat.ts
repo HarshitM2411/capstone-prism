@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { GatewayConfig, ModelInfo, RetryPolicy } from '../config/gatewayConfig.js';
-import type { RequestLogWriter } from '../db/requestLogs.js';
+import type { RequestLogEntry, RequestLogWriter } from '../db/requestLogs.js';
 import { authenticate, type KeyStore } from '../http/auth.js';
 import type { RequestContext } from '../http/context.js';
 import {
@@ -23,8 +23,19 @@ import type { RateLimiter } from '../limits/rpm.js';
 import { computeCostUnits } from '../money.js';
 import type { CallTimeouts, ProviderRegistry } from '../providers/types.js';
 import { modelChain } from '../routing/chain.js';
-import { ExecuteFailure, executeWithFailover, type ExecuteSuccess } from '../routing/executor.js';
+import {
+  ExecuteFailure,
+  executeStreamWithFailover,
+  executeWithFailover,
+  type AttemptFailure,
+} from '../routing/executor.js';
 import { resolveModel } from '../routing/resolve.js';
+import {
+  WordCounter,
+  createSseBody,
+  resolveStreamUsage,
+  type StreamSummary,
+} from '../streaming/relay.js';
 
 export interface ChatRouteDeps {
   config: GatewayConfig;
@@ -35,44 +46,31 @@ export interface ChatRouteDeps {
   providers: ProviderRegistry;
   timeouts: CallTimeouts;
   retry: RetryPolicy;
+  /** The longest one streamed response may last. */
+  streamMaxMs: number;
   /** Tracks background work (log writes, releases) so shutdown can wait for it. */
   track: (work: Promise<unknown>) => void;
 }
 
-/**
- * Phase 2/3 stub: proves the whole admission pipeline (auth → validation → model resolution →
- * allowlist → rate limit → budget → metering → log) end to end without calling a provider. It
- * reports realistic, non-zero usage so budgets are really spent and settled. Phase 4 replaces it
- * with the adapter call; the response shape (an OpenAI chat completion, or SSE) stays the same.
- */
-const STUB_TEXT =
-  'Prism gateway stub response. No provider was called; this placeholder is replaced by a real ' +
-  'provider reply once the adapter layer is built in a later phase of the project.';
-
-/** Same counting rule as the starter's mock providers: whitespace-separated words. */
-function countWords(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(1, words);
+/** What the handler has established by the time it holds a budget reservation. */
+interface Admitted {
+  request: FastifyRequest;
+  reply: FastifyReply;
+  ctx: RequestContext;
+  chat: ChatRequest;
+  chain: readonly ModelInfo[];
+  reservation: Reservation;
 }
 
-function sendStubStream(reply: FastifyReply, chat: ChatRequest, id: string, created: number) {
-  const chunk = (delta: object, finish: string | null): string =>
-    `data: ${JSON.stringify({
-      id,
-      object: 'chat.completion.chunk',
-      created,
-      model: chat.model,
-      choices: [{ index: 0, delta, finish_reason: finish }],
-    })}\n\n`;
-  const body =
-    chunk({ role: 'assistant', content: '' }, null) +
-    chunk({ content: STUB_TEXT }, null) +
-    chunk({}, 'stop') +
-    'data: [DONE]\n\n';
-  return reply
-    .header('content-type', 'text/event-stream')
-    .header('cache-control', 'no-cache')
-    .send(body);
+/** Prompt size by the same rule as the mock providers: whitespace-separated words. */
+function promptWords(chat: ChatRequest): number {
+  let total = 0;
+  for (const message of chat.messages) {
+    const words = new WordCounter();
+    words.add(message.content);
+    total += Math.max(1, words.count);
+  }
+  return total;
 }
 
 export const chatRoutes =
@@ -80,7 +78,7 @@ export const chatRoutes =
   async (app) => {
     // Step 1 of the check order. Runs in `onRequest`, i.e. before the body is read or parsed, so a
     // bad key never reveals anything about body validation (edge cases 1.6, 2.x).
-    app.addHook('onRequest', async (request) => {
+    app.addHook('onRequest', async (request, reply) => {
       const ctx: RequestContext = {
         requestId: request.id,
         keyId: null,
@@ -93,25 +91,44 @@ export const chatRoutes =
         logStatus: 'ok',
         errorCode: null,
         logged: false,
+        clientGone: false,
+        responseReady: false,
       };
       request.prism = ctx;
+      // A client that hangs up never gets `onResponse`; make sure its request is still logged.
+      reply.raw.once('close', () => {
+        if (reply.raw.writableFinished) return;
+        ctx.clientGone = true;
+        if (ctx.responseReady) writeLog(request, reply);
+      });
       ctx.auth = await authenticate(deps.keys, request.headers.authorization, (keyId) => {
         ctx.keyId = keyId;
       });
     });
 
     // Safety net: whatever happened, the response carries the full x-prism-* contract.
-    app.addHook('onSend', async (_request, reply, payload) => {
+    app.addHook('onSend', async (request, reply, payload) => {
       fillMissingPrismHeaders(reply);
+      const ctx = request.prism;
+      if (ctx !== null) {
+        ctx.responseReady = true;
+        // The client left while the handler was still working: the response will never be
+        // delivered, so no `onResponse` will follow. Log it now that its outcome is known.
+        if (ctx.clientGone) writeLog(request, reply);
+      }
       return payload;
     });
 
     // One log row per request, including rejections. Successful requests were already logged
-    // together with their budget settlement; everything else is logged here, after the response
-    // is sent, so a failing log write can never fail the client's request (proposal P3).
-    app.addHook('onResponse', async (request, reply) => {
+    // together with their budget settlement (streams: when the stream ended); everything else is
+    // logged after the response is sent (or abandoned), so a failing log write can never fail the
+    // client's request (proposal P3).
+    app.addHook('onResponse', async (request, reply) => writeLog(request, reply));
+
+    function writeLog(request: FastifyRequest, reply: FastifyReply): void {
       const ctx = request.prism;
       if (ctx === null || ctx.logged) return;
+      ctx.logged = true;
       const write = deps.requestLogs
         .write({
           requestId: ctx.requestId,
@@ -130,7 +147,7 @@ export const chatRoutes =
           request.log.error({ err, requestId: ctx.requestId }, 'failed to write request log');
         });
       deps.track(write);
-    });
+    }
 
     /** Step 5: the per-key requests-per-minute window. Fails closed if Redis cannot answer. */
     async function enforceRateLimit(request: FastifyRequest, ctx: RequestContext): Promise<void> {
@@ -146,19 +163,15 @@ export const chatRoutes =
     }
 
     /**
-     * Step 9 for non-streaming requests: the alias's fallback chain, run through the retry /
-     * failover engine. Transient failures are retried, persistent ones fail over, and the whole
-     * thing is bounded by the request deadline. If nothing answers, the client gets a generic
-     * `502` (nothing is billed; the caller releases the hold). The provider's own message, body
-     * and key never reach the client.
+     * Step 9: runs the provider call (plain or up to the first stream chunk) through the retry /
+     * failover engine, bounded by the request deadline. If nothing answers, the client gets a
+     * generic `502` (nothing is billed; the caller releases the hold). The provider's own
+     * message, body and key never reach the client.
      */
-    async function callProvider(
-      request: FastifyRequest,
-      reply: FastifyReply,
-      ctx: RequestContext,
-      chat: ChatRequest,
-      chain: readonly ModelInfo[],
-    ): Promise<ExecuteSuccess> {
+    async function callProvider<T extends { retries: number; fallback: boolean }>(
+      { request, reply, ctx }: Pick<Admitted, 'request' | 'reply' | 'ctx'>,
+      run: (signal: AbortSignal, onAttemptFailed: (event: AttemptFailure) => void) => Promise<T>,
+    ): Promise<T> {
       // If the client goes away before the answer is ready, stop paying for the upstream call.
       const abort = new AbortController();
       const onClose = (): void => {
@@ -166,28 +179,21 @@ export const chatRoutes =
       };
       reply.raw.once('close', onClose);
       try {
-        return await executeWithFailover({
-          chain,
-          providers: deps.providers,
-          request: { messages: chat.messages, params: chat.params },
-          timeouts: deps.timeouts,
-          retry: deps.retry,
-          signal: abort.signal,
-          onAttemptFailed: (event) =>
-            request.log.warn(
-              {
-                requestId: ctx.requestId,
-                provider: event.model.provider,
-                model: event.model.name,
-                attempt: event.attempt,
-                kind: event.error.kind,
-                status: event.error.status,
-                next: event.next,
-                delayMs: event.delayMs,
-              },
-              'provider attempt failed',
-            ),
-        });
+        return await run(abort.signal, (event) =>
+          request.log.warn(
+            {
+              requestId: ctx.requestId,
+              provider: event.model.provider,
+              model: event.model.name,
+              attempt: event.attempt,
+              kind: event.error.kind,
+              status: event.error.status,
+              next: event.next,
+              delayMs: event.delayMs,
+            },
+            'provider attempt failed',
+          ),
+        );
       } catch (err) {
         if (!(err instanceof ExecuteFailure)) throw err;
         // Record what was tried, so the log row of the failed request is useful.
@@ -208,6 +214,182 @@ export const chatRoutes =
       } finally {
         reply.raw.off('close', onClose);
       }
+    }
+
+    /** A non-streaming request: the complete answer, billed from the provider's usage. */
+    async function respondComplete(admitted: Admitted) {
+      const { reply, ctx, chat, chain, reservation } = admitted;
+      const result = await callProvider(admitted, (signal, onAttemptFailed) =>
+        executeWithFailover({
+          chain,
+          providers: deps.providers,
+          request: { messages: chat.messages, params: chat.params },
+          timeouts: deps.timeouts,
+          retry: deps.retry,
+          signal,
+          onAttemptFailed,
+        }),
+      );
+      // The model that served the request is what is priced and logged. For a fallback it can
+      // differ from the primary the budget estimate was based on (edge case 5.16).
+      const served = result.model;
+      ctx.resolvedModel = served.name;
+      ctx.resolvedProvider = served.provider;
+      const { promptTokens, completionTokens } = result.response.usage;
+
+      // Billed from the provider-reported usage of the attempt that answered, at that model's
+      // price; failed attempts are never billed. Never from client-supplied numbers.
+      const costUnits = computeCostUnits(promptTokens, completionTokens, served);
+
+      // Settlement and the request's log row are written in one transaction, so
+      // `spent_usd` always equals the sum of the logged `cost_usd` (edge case 5.5).
+      await deps.budget.settle(reservation, costUnits, {
+        requestId: ctx.requestId,
+        keyId: ctx.auth!.keyId,
+        requestedModel: ctx.requestedModel,
+        resolvedModel: served.name,
+        resolvedProvider: served.provider,
+        fallback: result.fallback,
+        retries: result.retries,
+        status: 'ok',
+        httpStatus: 200,
+        errorCode: null,
+        promptTokens,
+        completionTokens,
+        costUnits,
+        latencyMs: reply.elapsedTime,
+      });
+      ctx.logged = true;
+
+      setPrismHeaders(reply, {
+        provider: `${served.provider}/${served.name}`,
+        cache: 'miss',
+        fallback: result.fallback,
+        costUnits,
+      });
+      return reply.send({
+        id: `chatcmpl-${ctx.requestId.replaceAll('-', '').slice(0, 24)}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: chat.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: result.response.content },
+            finish_reason: result.response.finishReason,
+          },
+        ],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+        },
+      });
+    }
+
+    /**
+     * A streaming request. Everything up to the first upstream chunk behaves like a plain call
+     * (retry, failover, a JSON `502` if nothing answers), so the headers below are accurate. From
+     * then on the stream owns the request: it settles the budget and writes the log row when it
+     * ends, however it ends.
+     */
+    async function respondStreaming(admitted: Admitted) {
+      const { request, reply, ctx, chat, chain, reservation } = admitted;
+      const opened = await callProvider(admitted, (signal, onAttemptFailed) =>
+        executeStreamWithFailover({
+          chain,
+          providers: deps.providers,
+          request: { messages: chat.messages, params: chat.params },
+          timeouts: deps.timeouts,
+          retry: deps.retry,
+          streamMaxMs: deps.streamMaxMs,
+          signal,
+          onAttemptFailed,
+        }),
+      );
+      const served = opened.model;
+      ctx.resolvedModel = served.name;
+      ctx.resolvedProvider = served.provider;
+      ctx.fallback = opened.fallback;
+      ctx.retries = opened.retries;
+      const promptEstimate = promptWords(chat);
+
+      const finish = async (summary: StreamSummary): Promise<void> => {
+        const { usage, estimated } = resolveStreamUsage(summary, promptEstimate);
+        const costUnits = computeCostUnits(usage.promptTokens, usage.completionTokens, served);
+        const entry: RequestLogEntry = {
+          requestId: ctx.requestId,
+          keyId: ctx.auth!.keyId,
+          requestedModel: ctx.requestedModel,
+          resolvedModel: served.name,
+          resolvedProvider: served.provider,
+          fallback: opened.fallback,
+          retries: opened.retries,
+          ...(summary.end === 'complete'
+            ? { status: 'ok', httpStatus: 200, errorCode: null }
+            : summary.end === 'upstream_failed'
+              ? { status: 'upstream_error', httpStatus: 200, errorCode: 'upstream_error' }
+              : {
+                  status: 'client_disconnect',
+                  httpStatus: 499,
+                  errorCode: 'client_closed_request',
+                }),
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          costUnits,
+          usageEstimated: estimated,
+          latencyMs: reply.elapsedTime,
+          timeToFirstTokenMs: summary.timeToFirstTokenMs,
+        };
+        if (summary.end !== 'complete') {
+          request.log.warn(
+            { requestId: ctx.requestId, end: summary.end, lastKind: summary.failure?.kind ?? null },
+            'stream ended early',
+          );
+        }
+        try {
+          await deps.budget.settle(reservation, costUnits, entry);
+        } catch (err) {
+          request.log.error(
+            { err, requestId: ctx.requestId },
+            'failed to settle a streamed request (releasing the hold)',
+          );
+          await deps.budget.release(reservation).catch(() => undefined);
+        }
+      };
+
+      const { body, done } = createSseBody({
+        opened: opened.stream,
+        res: reply.raw,
+        id: `chatcmpl-${ctx.requestId.replaceAll('-', '').slice(0, 24)}`,
+        created: Math.floor(Date.now() / 1000),
+        model: chat.model,
+        includeUsage: chat.includeUsage,
+        promptTokensEstimate: promptEstimate,
+        maxDurationMs: deps.streamMaxMs,
+        elapsedMs: () => reply.elapsedTime,
+        onEnd: finish,
+      });
+      // From here the stream settles the reservation and writes the log row itself.
+      ctx.logged = true;
+      deps.track(done);
+
+      // The cost is not known up front, so there is no cost header on a stream; it goes to the
+      // log and usage records when the stream ends.
+      setPrismHeaders(reply, {
+        provider: `${served.provider}/${served.name}`,
+        cache: 'miss',
+        fallback: opened.fallback,
+        costUnits: null,
+      });
+      return (
+        reply
+          .header('content-type', 'text/event-stream; charset=utf-8')
+          .header('cache-control', 'no-cache, no-transform')
+          // Ask reverse proxies (nginx) not to hold the stream back.
+          .header('x-accel-buffering', 'no')
+          .send(body)
+      );
     }
 
     app.post('/v1/chat/completions', async (request, reply) => {
@@ -235,8 +417,7 @@ export const chatRoutes =
       await enforceRateLimit(request, ctx);
 
       // (Step 6, `auto` classification, arrives in Phase 7.)
-      const priced = pricingModel(deps.config, resolved);
-      ctx.resolvedModel = priced.name;
+      ctx.resolvedModel = pricingModel(deps.config, resolved).name;
 
       // Step 7: reserve budget. Nothing is held when this rejects.
       let reservation: Reservation | null;
@@ -255,92 +436,16 @@ export const chatRoutes =
 
       // From here on the reservation must be settled or released, whatever happens.
       try {
-        // Step 8 (cache) arrives in Phase 8. Step 9: the provider. Streaming is still answered by
-        // the stub until Phase 6; everything else goes to the resolved model's provider.
-        let promptTokens: number;
-        let completionTokens: number;
-        let content = STUB_TEXT;
-        let finishReason = 'stop';
-        let providerLabel = 'none';
-        // The model that served the request, which is what is priced and logged. For a fallback
-        // it can differ from the primary the budget estimate was based on (edge case 5.16).
-        let served: ModelInfo = priced;
-        let fallback = false;
-        let retries = 0;
-        if (chat.stream) {
-          promptTokens = chat.messages.reduce((sum, m) => sum + countWords(m.content), 0);
-          completionTokens = countWords(STUB_TEXT);
-        } else {
-          const result = await callProvider(
-            request,
-            reply,
-            ctx,
-            chat,
-            modelChain(deps.config, resolved),
-          );
-          served = result.model;
-          fallback = result.fallback;
-          retries = result.retries;
-          ctx.resolvedModel = served.name;
-          ctx.resolvedProvider = served.provider;
-          promptTokens = result.response.usage.promptTokens;
-          completionTokens = result.response.usage.completionTokens;
-          content = result.response.content;
-          finishReason = result.response.finishReason;
-          providerLabel = `${served.provider}/${served.name}`;
-        }
-        // Billed from the provider-reported usage of the attempt that answered, at that model's
-        // price; failed attempts are never billed. Never from client-supplied numbers.
-        const costUnits = computeCostUnits(promptTokens, completionTokens, served);
-
-        // Settlement and the request's log row are written in one transaction, so
-        // `spent_usd` always equals the sum of the logged `cost_usd` (edge case 5.5).
-        await deps.budget.settle(reservation, costUnits, {
-          requestId: ctx.requestId,
-          keyId: auth.keyId,
-          requestedModel: ctx.requestedModel,
-          resolvedModel: served.name,
-          resolvedProvider: chat.stream ? null : served.provider,
-          fallback,
-          retries,
-          status: 'ok',
-          httpStatus: 200,
-          errorCode: null,
-          promptTokens,
-          completionTokens,
-          costUnits,
-          latencyMs: reply.elapsedTime,
-        });
-        ctx.logged = true;
-
-        const id = chat.stream
-          ? `chatcmpl-stub-${ctx.requestId.slice(0, 12)}`
-          : `chatcmpl-${ctx.requestId.replaceAll('-', '').slice(0, 24)}`;
-        const created = Math.floor(Date.now() / 1000);
-        setPrismHeaders(reply, {
-          provider: providerLabel,
-          cache: 'miss',
-          fallback,
-          costUnits,
-        });
-        if (chat.stream) {
-          setPrismHeaders(reply, { costUnits: null }); // the cost header is never sent on streams
-          return sendStubStream(reply, chat, id, created);
-        }
-        return reply.send({
-          id,
-          object: 'chat.completion',
-          created,
-          model: chat.model,
-          choices: [
-            { index: 0, message: { role: 'assistant', content }, finish_reason: finishReason },
-          ],
-          usage: {
-            prompt_tokens: promptTokens,
-            completion_tokens: completionTokens,
-            total_tokens: promptTokens + completionTokens,
-          },
-        });
+        // Step 8 (cache) arrives in Phase 8. Step 9: the provider.
+        const admitted: Admitted = {
+          request,
+          reply,
+          ctx,
+          chat,
+          chain: modelChain(deps.config, resolved),
+          reservation,
+        };
+        return await (chat.stream ? respondStreaming(admitted) : respondComplete(admitted));
       } catch (err) {
         if (!ctx.logged) {
           // Not settled: give the hold back so it cannot block the key's budget (edge case 5.6).

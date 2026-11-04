@@ -155,20 +155,22 @@ This plan breaks the build into phases. Each phase has a goal, concrete tasks, a
 
 **Goal:** `stream: true` works token-by-token, end to end, with correct usage capture and documented failure behavior.
 
-- [ ] SSE response wiring (`Content-Type: text/event-stream`): pipe each chunk from the adapter's async iterable to the client as it arrives, respecting backpressure.
-- [ ] Hold response headers until the first upstream chunk arrives so `x-prism-provider`/`x-prism-fallback` are accurate; a failure before the first chunk retries/fails over transparently.
-- [ ] Streaming headers: `x-prism-provider`, `x-prism-cache`, `x-prism-fallback` up front; `x-prism-cost-usd` is not required on streams — the final cost goes to the request log and usage API.
-- [ ] Correct `data: [DONE]` termination, exactly once.
-- [ ] Final usage chunk captured from the mock providers and used for cost/metering/budget settlement even though the body was streamed.
-- [ ] **Mid-stream failure behavior (documented):** after the first chunk, never switch provider or splice output; send an SSE `error` event, then `data: [DONE]`, close the stream, log `upstream_error`.
-- [ ] **Client disconnect:** abort the upstream call, release resources, log `client_disconnect`; bill delivered tokens as a flagged estimate (`usage_estimated`), or `0` if nothing was delivered.
-- [ ] Per-chunk idle timeout so a stalled provider cannot hold a connection forever.
-- [ ] Test: streamed response is NOT buffered — verify chunks arrive incrementally (the mocks pace ~20 ms per token) by timing between chunks in a test harness, not all at once at the end.
-- [ ] Tests: provider dies mid-stream; client disconnects mid-stream; failure before the first chunk fails over.
+- [x] SSE response wiring (`Content-Type: text/event-stream`): pipe each chunk from the adapter's async iterable to the client as it arrives, respecting backpressure.
+- [x] Hold response headers until the first upstream chunk arrives so `x-prism-provider`/`x-prism-fallback` are accurate; a failure before the first chunk retries/fails over transparently.
+- [x] Streaming headers: `x-prism-provider`, `x-prism-cache`, `x-prism-fallback` up front; `x-prism-cost-usd` is not required on streams — the final cost goes to the request log and usage API.
+- [x] Correct `data: [DONE]` termination, exactly once.
+- [x] Final usage chunk captured from the mock providers and used for cost/metering/budget settlement even though the body was streamed.
+- [x] **Mid-stream failure behavior (documented):** after the first chunk, never switch provider or splice output; send an SSE `error` event, then `data: [DONE]`, close the stream, log `upstream_error`.
+- [x] **Client disconnect:** abort the upstream call, release resources, log `client_disconnect`; bill delivered tokens as a flagged estimate (`usage_estimated`), or `0` if nothing was delivered.
+- [x] Per-chunk idle timeout so a stalled provider cannot hold a connection forever.
+- [x] Test: streamed response is NOT buffered — verify chunks arrive incrementally (the mocks pace ~20 ms per token) by timing between chunks in a test harness, not all at once at the end.
+- [x] Tests: provider dies mid-stream; client disconnects mid-stream; failure before the first chunk fails over.
 
 **Exit criteria:** A streaming request produces visibly incremental output and still logs correct token/cost data afterward; a mid-stream failure terminates cleanly with an error event and `[DONE]`.
 
 ---
+
+**Status: complete.** Notes: `executeStreamWithFailover` (in `src/routing/executor.ts`) reuses the Phase 5 retry/failover loop but only up to the first chunk: the adapter stream is opened and its first step read inside the attempt, so a failure, hang or `429` before any byte is retried or failed over invisibly, and the headers are built from the model that actually answered. If nothing answers, the client gets the normal JSON `502` (never a half-open SSE body). `src/streaming/relay.ts` turns the upstream chunks into OpenAI `chat.completion.chunk` events through a pull-based `Readable` (backpressure is real: a client that stops reading stops the provider read, and nothing but counters is kept). It ends every stream with exactly one `data: [DONE]`; a failure after the first chunk becomes an `event: error` (generic message, no provider detail) followed by `[DONE]`, and never switches provider. `onEnd` runs exactly once however the stream ends (complete, provider failure, client gone, time cap) and settles the budget and writes the single log row in one transaction: provider-reported usage is billed as is; otherwise tokens are estimated from the delivered text (words, like the mocks) and the row is flagged `usage_estimated`, and nothing is billed if nothing was delivered. A client hang-up aborts the upstream call immediately and logs `client_disconnect` (499). New: `STREAM_MAX_DURATION_MS` (default 120000) caps one stream, since `REQUEST_DEADLINE_MS` only bounds the wait for the first chunk (the stale-reservation cutoff now sits above it); `request_logs` now stores `usage_estimated` and `time_to_first_token_ms`; `stream_options.include_usage` adds a final usage chunk; `x-accel-buffering: no` and `cache-control: no-cache, no-transform` keep proxies from buffering. Also fixed here (it affected non-streaming requests too): a client that disconnects never triggered Fastify's `onResponse`, so its log row was lost; the route now logs it from the connection `close`. Verified live against the mocks (progressive delivery, failover before the first chunk, immediate `429` failover, both providers down, client hang-up with an estimated bill, no leftover holds, `spent_usd` equals the sum of the logged costs). The mid-stream death and missing-usage cases are covered by the fake provider tests (the mocks cannot inject them). The Postgres `request_logs.cache` column is still always `miss` until Phase 8.
 
 ## Phase 7 — Smart Routing (`auto`) + Eval Harness
 

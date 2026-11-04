@@ -105,6 +105,25 @@ describe('loadEnv', () => {
     });
   });
 
+  describe('STREAM_MAX_DURATION_MS', () => {
+    it('defaults to two minutes, and never below the request deadline', () => {
+      expect(loadEnv(base).streamMaxDurationMs).toBe(120_000);
+      expect(loadEnv({ ...base, REQUEST_DEADLINE_MS: '300000' }).streamMaxDurationMs).toBe(300_000);
+    });
+
+    it('is configurable and bounded', () => {
+      expect(loadEnv({ ...base, STREAM_MAX_DURATION_MS: '30000' }).streamMaxDurationMs).toBe(
+        30_000,
+      );
+      expect(() => loadEnv({ ...base, STREAM_MAX_DURATION_MS: 'long' })).toThrow(
+        /STREAM_MAX_DURATION_MS/,
+      );
+      expect(() => loadEnv({ ...base, STREAM_MAX_DURATION_MS: '5000' })).toThrow(
+        /must not be below REQUEST_DEADLINE_MS/,
+      );
+    });
+  });
+
   describe('ADMIN_TOKEN', () => {
     it('is required', () => {
       expect(() => loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS })).toThrow(

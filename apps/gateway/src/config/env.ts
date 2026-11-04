@@ -33,6 +33,8 @@ export interface Env {
   providerIdleTimeoutMs: number;
   /** Cap on the whole provider call (and, from Phase 5, on all attempts of one request). */
   requestDeadlineMs: number;
+  /** Cap on the total duration of one streamed response (a long answer may outlast the deadline). */
+  streamMaxDurationMs: number;
   /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
   adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
@@ -162,6 +164,20 @@ export function loadEnv(
     );
   }
 
+  const streamMaxDurationMs = parseInteger(
+    source,
+    'STREAM_MAX_DURATION_MS',
+    Math.max(120_000, requestDeadlineMs),
+    1000,
+    3_600_000,
+  );
+  if (streamMaxDurationMs < requestDeadlineMs) {
+    throw new ConfigError(
+      'STREAM_MAX_DURATION_MS must not be below REQUEST_DEADLINE_MS ' +
+        `(got ${streamMaxDurationMs} < ${requestDeadlineMs})`,
+    );
+  }
+
   return {
     port,
     host,
@@ -174,6 +190,7 @@ export function loadEnv(
     providerFirstByteTimeoutMs,
     providerIdleTimeoutMs: parseInteger(source, 'PROVIDER_IDLE_TIMEOUT_MS', 10_000, 100, 120_000),
     requestDeadlineMs,
+    streamMaxDurationMs,
     adminToken,
     dataDir,
     gatewayConfigFile,

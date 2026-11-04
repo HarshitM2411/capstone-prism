@@ -86,6 +86,8 @@ interface LogRow {
   resolved_model: string | null;
   fallback: boolean;
   retries: number;
+  usage_estimated: boolean;
+  time_to_first_token_ms: number | null;
 }
 
 async function logs(): Promise<LogRow[]> {
@@ -235,6 +237,38 @@ describe('end to end against Postgres: auth → validation → resolution → lo
     await app?.close();
     app = undefined;
     await dead.end();
+  });
+
+  it('a streamed request writes its row at the end of the stream, in step with the budget (Phase 6)', async () => {
+    const instance = appFor(pool);
+    const search = (await findKeyByRawKey(pool, 'prism-sk-search-1a2b3c'))!;
+    const res = await post(instance, 'prism-sk-search-1a2b3c', { ...body, stream: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.headers).not.toHaveProperty('x-prism-cost-usd');
+    expect(res.body.trimEnd().endsWith('data: [DONE]')).toBe(true);
+
+    const rows = await logs();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      request_id: res.headers['x-request-id'],
+      status: 'ok',
+      http_status: 200,
+      resolved_provider: 'alpha',
+      resolved_model: 'alpha-small',
+      usage_estimated: false,
+    });
+    expect(rows[0]!.time_to_first_token_ms).toBeGreaterThanOrEqual(0);
+    expect(Number(rows[0]!.cost_usd)).toBeGreaterThan(0);
+
+    const { rows: usage } = await pool.query<{ spent_usd: string; reserved_usd: string }>(
+      'SELECT spent_usd, reserved_usd FROM budget_usage WHERE key_id = $1',
+      [search.id],
+    );
+    expect(Number(usage[0]!.spent_usd)).toBe(Number(rows[0]!.cost_usd));
+    expect(Number(usage[0]!.reserved_usd)).toBe(0);
+    const { rows: holds } = await pool.query('SELECT 1 FROM budget_reservations');
+    expect(holds).toHaveLength(0);
   });
 
   it('returns the admin ping only with the token', async () => {

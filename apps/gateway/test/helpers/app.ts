@@ -12,7 +12,7 @@ import {
   type ReserveInput,
 } from '../../src/limits/budget.js';
 import type { RateLimitDecision, RateLimiter } from '../../src/limits/rpm.js';
-import { FakeRegistry } from '../../src/providers/fake.js';
+import { FakeRegistry, type FakeAdapterOptions } from '../../src/providers/fake.js';
 import { DATA_DIR } from './dataDir.js';
 
 export const config = loadGatewayConfig(DATA_DIR);
@@ -180,13 +180,16 @@ export interface TestApp {
   events: Events;
 }
 
-export function buildTestApp(overrides: Partial<AppOptions> = {}): TestApp {
+export function buildTestApp(
+  overrides: Partial<AppOptions> = {},
+  fakeOptions: FakeAdapterOptions = {},
+): TestApp {
   const events: Events = [];
   const keys = memoryKeys();
   const logs = memoryLogs();
   const limiter = memoryRateLimiter(events);
   const budget = memoryBudget(logs, events);
-  const providers = new FakeRegistry([...config.providers.keys()]);
+  const providers = new FakeRegistry([...config.providers.keys()], fakeOptions);
   const app = buildApp({
     logLevel: 'silent',
     config,

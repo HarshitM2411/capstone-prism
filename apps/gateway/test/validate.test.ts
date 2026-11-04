@@ -19,10 +19,23 @@ describe('validateChatRequest', () => {
         model: 'fast',
         messages: [{ role: 'user', content: 'hello' }],
         stream: false,
+        includeUsage: false,
         maxTokens: null,
         params: {},
       },
     });
+  });
+
+  it('reads stream_options.include_usage, and rejects a malformed stream_options', () => {
+    const wants = validateChatRequest({
+      ...base,
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(wants).toMatchObject({ ok: true, request: { stream: true, includeUsage: true } });
+    const other = validateChatRequest({ ...base, stream_options: { include_usage: 'yes' } });
+    expect(other).toMatchObject({ ok: true, request: { includeUsage: false } });
+    expect(validateChatRequest({ ...base, stream_options: 'x' })).toMatchObject({ ok: false });
   });
 
   it('accepts every starter sample request except the malformed one', () => {

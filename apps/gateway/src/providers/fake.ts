@@ -138,7 +138,22 @@ export class FakeAdapter implements ProviderAdapter {
     };
   }
 
+  /** Streams opened and not yet finished, closed or aborted: a leak detector for tests. */
+  streamsInFlight = 0;
+
   async *chatCompletionStream(
+    request: UpstreamRequest,
+    options: CallOptions,
+  ): AsyncGenerator<UpstreamChunk> {
+    this.streamsInFlight++;
+    try {
+      yield* this.runStream(request, options);
+    } finally {
+      this.streamsInFlight--;
+    }
+  }
+
+  private async *runStream(
     request: UpstreamRequest,
     options: CallOptions,
   ): AsyncGenerator<UpstreamChunk> {

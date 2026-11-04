@@ -30,6 +30,8 @@ export interface AppOptions {
   timeouts: CallTimeouts;
   /** Overrides the retry policy from the gateway config (tests use a fast one). */
   retry?: RetryPolicy;
+  /** The longest one streamed response may last (default two minutes). */
+  streamMaxMs?: number;
   /** The expected `x-admin-token` value for `/admin/*`. */
   adminToken: string;
   /**
@@ -150,6 +152,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       providers: options.providers,
       timeouts: options.timeouts,
       retry: options.retry ?? options.config.retry,
+      streamMaxMs: options.streamMaxMs ?? 120_000,
       track,
     }),
   );

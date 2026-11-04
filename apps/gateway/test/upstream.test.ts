@@ -132,12 +132,12 @@ describe('the provider call (Phase 4 pass-through)', () => {
     expect(t.budget.settled).toHaveLength(1);
   });
 
-  it('still answers streaming requests from the stub (the streaming path arrives in Phase 6)', async () => {
+  it('streaming requests reach the provider too (their path is covered in streaming.test.ts)', async () => {
     const t = start();
     const res = await post(t, { stream: true });
     expect(res.statusCode).toBe(200);
-    expect(res.headers['x-prism-provider']).toBe('none');
-    expect(t.providers.must('alpha').calls).toHaveLength(0);
+    expect(res.headers['x-prism-provider']).toBe('alpha/alpha-small');
+    expect(t.providers.must('alpha').calls).toHaveLength(1);
   });
 });
 

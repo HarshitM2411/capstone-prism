@@ -3,7 +3,9 @@ import { ProviderError } from '../providers/errors.js';
 import type {
   CallOptions,
   CallTimeouts,
+  ProviderAdapter,
   ProviderRegistry,
+  UpstreamChunk,
   UpstreamRequest,
   UpstreamResponse,
 } from '../providers/types.js';
@@ -20,13 +22,14 @@ import type {
  *  - one overall deadline caps the sum of all attempts and backoffs.
  *
  * Every request starts with the primary, so traffic returns to a restored primary immediately.
+ *
+ * Streams use the same engine, but only up to the first chunk: once a chunk has reached the
+ * caller, the provider is committed and nothing is retried or spliced (edge cases 8.14, 9.2).
  */
-export interface ExecuteInput {
+export interface ExecuteBase {
   /** Models in the order they are tried; the first is the primary. */
   chain: readonly ModelInfo[];
   providers: ProviderRegistry;
-  /** The client's request; `model` is replaced by each target's provider-side model id. */
-  request: Omit<UpstreamRequest, 'model'>;
   timeouts: CallTimeouts;
   retry: RetryPolicy;
   signal?: AbortSignal;
@@ -36,6 +39,16 @@ export interface ExecuteInput {
   random?: () => number;
   sleep?: (ms: number, signal: AbortSignal | undefined) => Promise<void>;
   now?: () => number;
+}
+
+export interface ExecuteInput extends ExecuteBase {
+  /** The client's request; `model` is replaced by each target's provider-side model id. */
+  request: Omit<UpstreamRequest, 'model'>;
+}
+
+export interface StreamExecuteInput extends ExecuteInput {
+  /** The longest a stream may last once it has started (the request deadline only covers the start). */
+  streamMaxMs: number;
 }
 
 export interface AttemptFailure {
@@ -49,8 +62,7 @@ export interface AttemptFailure {
   delayMs: number | null;
 }
 
-export interface ExecuteSuccess {
-  response: UpstreamResponse;
+interface Served {
   /** The model that produced the response: this is what gets priced and logged. */
   model: ModelInfo;
   /** A model other than the primary served the request. */
@@ -59,6 +71,23 @@ export interface ExecuteSuccess {
   retries: number;
   /** Total provider calls made, failed ones included. */
   attempts: number;
+}
+
+export interface ExecuteSuccess extends Served {
+  response: UpstreamResponse;
+}
+
+/** A stream whose first step has already been read: the provider has answered. */
+export interface OpenedStream {
+  /** Normally the first chunk; `done` for a stream that ended without sending anything. */
+  first: IteratorResult<UpstreamChunk>;
+  iterator: AsyncIterator<UpstreamChunk>;
+  /** Stops the upstream call (idempotent). Used for client disconnects and the stream cap. */
+  abort(): void;
+}
+
+export interface StreamSuccess extends Served {
+  stream: OpenedStream;
 }
 
 /** Nothing produced a response. `lastModel` is the last one tried. */
@@ -102,7 +131,21 @@ function defaultSleep(ms: number, signal: AbortSignal | undefined): Promise<void
   });
 }
 
-export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteSuccess> {
+/** What one attempt may spend, derived from the time left before the request deadline. */
+interface AttemptBudget {
+  firstByteMs: number;
+  idleMs: number;
+  remainingMs: number;
+}
+
+/**
+ * The retry / failover loop shared by plain and streaming requests. `attempt` makes one call on
+ * one model and resolves with its result (or rejects with a `ProviderError`).
+ */
+async function runChain<T>(
+  input: ExecuteBase,
+  attempt: (adapter: ProviderAdapter, model: ModelInfo, budget: AttemptBudget) => Promise<T>,
+): Promise<{ value: T } & Served> {
   const { chain, retry } = input;
   const now = input.now ?? Date.now;
   const sleep = input.sleep ?? defaultSleep;
@@ -122,7 +165,7 @@ export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteS
       throw new Error(`no adapter registered for provider "${model.provider}"`);
     }
 
-    for (let attempt = 1; ; attempt++) {
+    for (let attemptNumber = 1; ; attemptNumber++) {
       if (input.signal?.aborted === true) {
         throw new ExecuteFailure('aborted', lastError, model, retries, attempts, index > 0);
       }
@@ -131,30 +174,22 @@ export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteS
         throw new ExecuteFailure('deadline', lastError, model, retries, attempts, index > 0);
       }
 
-      // No call may outlive the request deadline, whatever its own timeouts say.
-      const options: CallOptions = {
-        timeouts: {
-          firstByteMs: Math.min(input.timeouts.firstByteMs, remaining),
-          idleMs: input.timeouts.idleMs,
-          deadlineMs: remaining,
-        },
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      };
-
       attempts++;
       try {
-        const response = await adapter.chatCompletion(
-          { ...input.request, model: model.name },
-          options,
-        );
-        return { response, model, fallback: index > 0, retries, attempts };
+        // No call may outlive the request deadline, whatever its own timeouts say.
+        const value = await attempt(adapter, model, {
+          firstByteMs: Math.min(input.timeouts.firstByteMs, remaining),
+          idleMs: input.timeouts.idleMs,
+          remainingMs: remaining,
+        });
+        return { value, model, fallback: index > 0, retries, attempts };
       } catch (err) {
         if (!(err instanceof ProviderError)) throw err;
         lastError = err;
 
         const disposition = err.disposition;
-        const canRetry = disposition === 'retry' && attempt < retry.maxAttempts;
-        const delayMs = canRetry ? backoffDelayMs(retry, attempt, random) : null;
+        const canRetry = disposition === 'retry' && attemptNumber < retry.maxAttempts;
+        const delayMs = canRetry ? backoffDelayMs(retry, attemptNumber, random) : null;
         // A retry that could not even start before the deadline is pointless: move on.
         const retryFits = delayMs !== null && delayMs < deadline - now();
         const hasNextModel = index < chain.length - 1;
@@ -166,7 +201,7 @@ export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteS
 
         input.onAttemptFailed?.({
           model,
-          attempt,
+          attempt: attemptNumber,
           error: err,
           next,
           delayMs: next === 'retry' ? delayMs : null,
@@ -187,4 +222,70 @@ export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteS
 
   // Unreachable in practice (the last model ends in a return or a throw), but keep it explicit.
   throw new ExecuteFailure('provider', lastError, lastModel, retries, attempts, chain.length > 1);
+}
+
+export async function executeWithFailover(input: ExecuteInput): Promise<ExecuteSuccess> {
+  const { value, ...served } = await runChain(input, (adapter, model, budget) => {
+    const options: CallOptions = {
+      timeouts: {
+        firstByteMs: budget.firstByteMs,
+        idleMs: budget.idleMs,
+        deadlineMs: budget.remainingMs,
+      },
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    };
+    return adapter.chatCompletion({ ...input.request, model: model.name }, options);
+  });
+  return { response: value, ...served };
+}
+
+/**
+ * Opens a stream on the first model that produces a first chunk, retrying and failing over
+ * exactly like a plain call. The request deadline bounds the wait for that first chunk; after it
+ * the stream may run for up to `streamMaxMs`. The returned stream is positioned after its first
+ * step, which the caller must still relay.
+ */
+export async function executeStreamWithFailover(input: StreamExecuteInput): Promise<StreamSuccess> {
+  const { value, ...served } = await runChain(input, async (adapter, model, budget) => {
+    // Our own abort handle: it fires when the first chunk is overdue (the request deadline) and
+    // is what the caller uses later to stop the stream. The client's signal is folded in.
+    const stop = new AbortController();
+    let overdue = false;
+    const timer = setTimeout(() => {
+      overdue = true;
+      stop.abort();
+    }, budget.remainingMs);
+    const signal =
+      input.signal === undefined ? stop.signal : AbortSignal.any([input.signal, stop.signal]);
+
+    const iterator = adapter
+      .chatCompletionStream(
+        { ...input.request, model: model.name },
+        {
+          timeouts: {
+            firstByteMs: budget.firstByteMs,
+            idleMs: budget.idleMs,
+            deadlineMs: Math.max(input.streamMaxMs, budget.remainingMs),
+          },
+          signal,
+        },
+      )
+      [Symbol.asyncIterator]();
+    try {
+      const first = await iterator.next();
+      return { first, iterator, abort: () => stop.abort() } satisfies OpenedStream;
+    } catch (err) {
+      if (overdue && err instanceof ProviderError && err.kind === 'aborted') {
+        throw new ProviderError(
+          'timeout',
+          err.provider,
+          `provider "${err.provider}" did not respond in time`,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  return { stream: value, ...served };
 }

@@ -23,7 +23,11 @@ export interface RequestLogEntry {
   completionTokens?: number;
   /** Cost in units of 1e-8 USD (the same amount that is settled into `budget_usage`). */
   costUnits?: bigint;
+  /** The token counts are our estimate (a stream that ended without the provider's usage). */
+  usageEstimated?: boolean;
   latencyMs: number;
+  /** Streams only: time until the first content reached the client. */
+  timeToFirstTokenMs?: number | null;
 }
 
 export interface RequestLogWriter {
@@ -47,8 +51,9 @@ export async function insertRequestLog(db: Queryable, entry: RequestLogEntry): P
   await db.query(
     `INSERT INTO request_logs
        (request_id, key_id, requested_model, resolved_model, resolved_provider, fallback, retries,
-        status, http_status, error_code, prompt_tokens, completion_tokens, cost_usd, latency_ms)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        status, http_status, error_code, prompt_tokens, completion_tokens, cost_usd, latency_ms,
+        usage_estimated, time_to_first_token_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       entry.requestId,
       entry.keyId,
@@ -64,6 +69,10 @@ export async function insertRequestLog(db: Queryable, entry: RequestLogEntry): P
       entry.completionTokens ?? 0,
       toSqlNumeric(entry.costUnits ?? 0n),
       Math.max(0, Math.round(entry.latencyMs)),
+      entry.usageEstimated ?? false,
+      entry.timeToFirstTokenMs === null || entry.timeToFirstTokenMs === undefined
+        ? null
+        : Math.max(0, Math.round(entry.timeToFirstTokenMs)),
     ],
   );
 }
