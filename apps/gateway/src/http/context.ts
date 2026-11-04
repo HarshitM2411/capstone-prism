@@ -17,6 +17,10 @@ export interface RequestContext {
   resolvedModel: string | null;
   /** The provider that was called, once a provider call was made. */
   resolvedProvider: string | null;
+  /** A model other than the primary was tried or served. */
+  fallback: boolean;
+  /** Same-model retries made so far. */
+  retries: number;
   logStatus: LogStatus;
   errorCode: string | null;
   /** The log row was already written (together with the budget settlement). */

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import type { GatewayConfig, ModelInfo } from '../config/gatewayConfig.js';
+import type { GatewayConfig, ModelInfo, RetryPolicy } from '../config/gatewayConfig.js';
 import type { RequestLogWriter } from '../db/requestLogs.js';
 import { authenticate, type KeyStore } from '../http/auth.js';
 import type { RequestContext } from '../http/context.js';
@@ -21,8 +21,9 @@ import type { BudgetStore, Reservation } from '../limits/budget.js';
 import { estimateCostUnits, pricingModel } from '../limits/estimate.js';
 import type { RateLimiter } from '../limits/rpm.js';
 import { computeCostUnits } from '../money.js';
-import { isProviderError } from '../providers/errors.js';
-import type { CallTimeouts, ProviderRegistry, UpstreamResponse } from '../providers/types.js';
+import type { CallTimeouts, ProviderRegistry } from '../providers/types.js';
+import { modelChain } from '../routing/chain.js';
+import { ExecuteFailure, executeWithFailover, type ExecuteSuccess } from '../routing/executor.js';
 import { resolveModel } from '../routing/resolve.js';
 
 export interface ChatRouteDeps {
@@ -33,6 +34,7 @@ export interface ChatRouteDeps {
   budget: BudgetStore;
   providers: ProviderRegistry;
   timeouts: CallTimeouts;
+  retry: RetryPolicy;
   /** Tracks background work (log writes, releases) so shutdown can wait for it. */
   track: (work: Promise<unknown>) => void;
 }
@@ -86,6 +88,8 @@ export const chatRoutes =
         requestedModel: null,
         resolvedModel: null,
         resolvedProvider: null,
+        fallback: false,
+        retries: 0,
         logStatus: 'ok',
         errorCode: null,
         logged: false,
@@ -115,6 +119,8 @@ export const chatRoutes =
           requestedModel: ctx.requestedModel,
           resolvedModel: ctx.resolvedModel,
           resolvedProvider: ctx.resolvedProvider,
+          fallback: ctx.fallback,
+          retries: ctx.retries,
           status: ctx.logStatus,
           httpStatus: reply.statusCode,
           errorCode: ctx.errorCode,
@@ -140,24 +146,19 @@ export const chatRoutes =
     }
 
     /**
-     * Step 9 for non-streaming requests: one call to the resolved model's provider, bounded by the
-     * adapter timeouts. Any provider failure becomes a generic `502` (nothing is billed, the hold
-     * is released by the caller); the provider's own message, body and key never reach the client.
+     * Step 9 for non-streaming requests: the alias's fallback chain, run through the retry /
+     * failover engine. Transient failures are retried, persistent ones fail over, and the whole
+     * thing is bounded by the request deadline. If nothing answers, the client gets a generic
+     * `502` (nothing is billed; the caller releases the hold). The provider's own message, body
+     * and key never reach the client.
      */
     async function callProvider(
       request: FastifyRequest,
       reply: FastifyReply,
       ctx: RequestContext,
       chat: ChatRequest,
-      model: ModelInfo,
-    ): Promise<UpstreamResponse> {
-      const adapter = deps.providers.get(model.provider);
-      if (adapter === undefined) {
-        // Startup validation guarantees every priced model has a registered provider.
-        throw new Error(`no adapter registered for provider "${model.provider}"`);
-      }
-      ctx.resolvedProvider = model.provider;
-
+      chain: readonly ModelInfo[],
+    ): Promise<ExecuteSuccess> {
       // If the client goes away before the answer is ready, stop paying for the upstream call.
       const abort = new AbortController();
       const onClose = (): void => {
@@ -165,17 +166,45 @@ export const chatRoutes =
       };
       reply.raw.once('close', onClose);
       try {
-        return await adapter.chatCompletion(
-          { model: model.name, messages: chat.messages, params: chat.params },
-          { timeouts: deps.timeouts, signal: abort.signal },
-        );
+        return await executeWithFailover({
+          chain,
+          providers: deps.providers,
+          request: { messages: chat.messages, params: chat.params },
+          timeouts: deps.timeouts,
+          retry: deps.retry,
+          signal: abort.signal,
+          onAttemptFailed: (event) =>
+            request.log.warn(
+              {
+                requestId: ctx.requestId,
+                provider: event.model.provider,
+                model: event.model.name,
+                attempt: event.attempt,
+                kind: event.error.kind,
+                status: event.error.status,
+                next: event.next,
+                delayMs: event.delayMs,
+              },
+              'provider attempt failed',
+            ),
+        });
       } catch (err) {
-        if (!isProviderError(err)) throw err;
+        if (!(err instanceof ExecuteFailure)) throw err;
+        // Record what was tried, so the log row of the failed request is useful.
+        ctx.resolvedModel = err.lastModel.name;
+        ctx.resolvedProvider = err.lastModel.provider;
+        ctx.fallback = err.failedOver;
+        ctx.retries = err.retries;
         request.log.warn(
-          { provider: err.provider, kind: err.kind, status: err.status, requestId: ctx.requestId },
-          'provider call failed',
+          {
+            requestId: ctx.requestId,
+            reason: err.reason,
+            attempts: err.attempts,
+            lastKind: err.lastError?.kind ?? null,
+          },
+          'provider call failed: no model produced a response',
         );
-        throw err.kind === 'aborted' ? clientClosed() : upstreamError();
+        throw err.reason === 'aborted' ? clientClosed() : upstreamError();
       } finally {
         reply.raw.off('close', onClose);
       }
@@ -233,19 +262,36 @@ export const chatRoutes =
         let content = STUB_TEXT;
         let finishReason = 'stop';
         let providerLabel = 'none';
+        // The model that served the request, which is what is priced and logged. For a fallback
+        // it can differ from the primary the budget estimate was based on (edge case 5.16).
+        let served: ModelInfo = priced;
+        let fallback = false;
+        let retries = 0;
         if (chat.stream) {
           promptTokens = chat.messages.reduce((sum, m) => sum + countWords(m.content), 0);
           completionTokens = countWords(STUB_TEXT);
         } else {
-          const upstream = await callProvider(request, reply, ctx, chat, priced);
-          promptTokens = upstream.usage.promptTokens;
-          completionTokens = upstream.usage.completionTokens;
-          content = upstream.content;
-          finishReason = upstream.finishReason;
-          providerLabel = `${priced.provider}/${priced.name}`;
+          const result = await callProvider(
+            request,
+            reply,
+            ctx,
+            chat,
+            modelChain(deps.config, resolved),
+          );
+          served = result.model;
+          fallback = result.fallback;
+          retries = result.retries;
+          ctx.resolvedModel = served.name;
+          ctx.resolvedProvider = served.provider;
+          promptTokens = result.response.usage.promptTokens;
+          completionTokens = result.response.usage.completionTokens;
+          content = result.response.content;
+          finishReason = result.response.finishReason;
+          providerLabel = `${served.provider}/${served.name}`;
         }
-        // Billed from the provider-reported usage and the price table, never from the client.
-        const costUnits = computeCostUnits(promptTokens, completionTokens, priced);
+        // Billed from the provider-reported usage of the attempt that answered, at that model's
+        // price; failed attempts are never billed. Never from client-supplied numbers.
+        const costUnits = computeCostUnits(promptTokens, completionTokens, served);
 
         // Settlement and the request's log row are written in one transaction, so
         // `spent_usd` always equals the sum of the logged `cost_usd` (edge case 5.5).
@@ -253,8 +299,10 @@ export const chatRoutes =
           requestId: ctx.requestId,
           keyId: auth.keyId,
           requestedModel: ctx.requestedModel,
-          resolvedModel: priced.name,
-          resolvedProvider: chat.stream ? null : priced.provider,
+          resolvedModel: served.name,
+          resolvedProvider: chat.stream ? null : served.provider,
+          fallback,
+          retries,
           status: 'ok',
           httpStatus: 200,
           errorCode: null,
@@ -272,7 +320,7 @@ export const chatRoutes =
         setPrismHeaders(reply, {
           provider: providerLabel,
           cache: 'miss',
-          fallback: false,
+          fallback,
           costUnits,
         });
         if (chat.stream) {

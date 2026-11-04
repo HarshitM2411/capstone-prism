@@ -134,20 +134,22 @@ This plan breaks the build into phases. Each phase has a goal, concrete tasks, a
 
 **Goal:** `fast`/`smart` aliases resolve correctly; failures trigger retry then failover; it's all recorded, counted, and billed correctly.
 
-- [ ] Alias → model → fallback chain resolution from `gateway_config.sample.json` (`fast`: `alpha-small` → `beta-small`; `smart`: `alpha-large` → `beta-large`).
-- [ ] Exponential backoff retry for transient errors (timeout, 5xx, connection reset) using the config's retry policy (3 attempts, 200 ms initial, ×2), with jitter.
-- [ ] Failover to the next model/provider in the chain on persistent failure, and **immediately on a provider `429`**; set `fallback` and log it.
-- [ ] Non-retryable provider 4xx → `502 upstream_error`, no retry, no failover; every provider failing → `502 upstream_error`, nothing billed.
-- [ ] **Retry/failover billing & rate-limit semantics** (decision + implementation): a single client request counts as **one** RPM hit regardless of how many internal retry/failover attempts it took; cost is billed only for the attempt that actually produced the response (failed attempts are not billed, even if a provider reports partial token usage before erroring); `retries` is recorded in the log.
-- [ ] `x-prism-provider` and `x-prism-fallback` headers populated correctly end-to-end.
-- [ ] Every request tries the primary first, so traffic returns to a restored primary immediately (Must Have behavior).
-- [ ] Test: use the mock's `/admin/config` (`{"mode": "down"}`) to take the primary down mid-test → confirm failover engages, is logged, and `x-prism-fallback: true`.
-- [ ] Test: a slow primary (`latency_ms: 3000`) → the timeout fires and the client is served by the fallback or gets a clean error; a flaky primary (`fail_rate: 0.3`) → retries absorb it.
-- [ ] Test: a request that retries once and fails over once still counts as exactly one RPM hit and is billed for exactly one (the successful) attempt's tokens.
+- [x] Alias → model → fallback chain resolution from `gateway_config.sample.json` (`fast`: `alpha-small` → `beta-small`; `smart`: `alpha-large` → `beta-large`).
+- [x] Exponential backoff retry for transient errors (timeout, 5xx, connection reset) using the config's retry policy (3 attempts, 200 ms initial, ×2), with jitter.
+- [x] Failover to the next model/provider in the chain on persistent failure, and **immediately on a provider `429`**; set `fallback` and log it.
+- [x] Non-retryable provider 4xx → `502 upstream_error`, no retry, no failover; every provider failing → `502 upstream_error`, nothing billed.
+- [x] **Retry/failover billing & rate-limit semantics** (decision + implementation): a single client request counts as **one** RPM hit regardless of how many internal retry/failover attempts it took; cost is billed only for the attempt that actually produced the response (failed attempts are not billed, even if a provider reports partial token usage before erroring); `retries` is recorded in the log.
+- [x] `x-prism-provider` and `x-prism-fallback` headers populated correctly end-to-end.
+- [x] Every request tries the primary first, so traffic returns to a restored primary immediately (Must Have behavior).
+- [x] Test: use the mock's `/admin/config` (`{"mode": "down"}`) to take the primary down mid-test → confirm failover engages, is logged, and `x-prism-fallback: true`.
+- [x] Test: a slow primary (`latency_ms: 3000`) → the timeout fires and the client is served by the fallback or gets a clean error; a flaky primary (`fail_rate: 0.3`) → retries absorb it.
+- [x] Test: a request that retries once and fails over once still counts as exactly one RPM hit and is billed for exactly one (the successful) attempt's tokens.
 
 **Exit criteria:** A request against `fast` or `smart` flows end-to-end to a mock provider and back with correct headers; a forced primary failure visibly fails over, recorded, counted, and billed exactly once; restoring the primary sends traffic back to it.
 
 ---
+
+**Status: complete.** Notes: src/routing/chain.ts builds the chain (alias chain, a single concrete model, or the smart chain for `auto` until Phase 7) and src/routing/executor.ts runs it. Transient errors (timeout, connection, 5xx) retry on the same model with backoff `initial x mult^(n-1)` with +/-25% jitter, up to 3 tries per model; a provider 429 or a malformed reply fails over immediately; auth/bad-request errors end the request as `502` with no failover; a client abort stops everything. One overall deadline (`REQUEST_DEADLINE_MS`) caps all attempts; each attempt gets `min(first-byte timeout, time left)`, and a retry whose backoff would not fit is skipped. Every request starts at the primary. One request is one RPM hit; only the successful attempt is billed, at the serving model's price (the reservation estimate uses the primary); `retries` and `fallback` are logged, and on total failure the log records the last model tried and nothing is billed. `x-prism-provider` is now `provider/model`. Verified live against the mocks (down, 429, 3000 ms latency, `fail_rate 0.3`, both down, restore) and `spent_usd` reconciles with `request_logs`. Limitations until later phases: streaming is still stubbed (Phase 6) and `auto` routes as `smart` (Phase 7).
 
 ## Phase 6 — Streaming Pass-Through
 

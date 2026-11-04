@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
-import type { GatewayConfig } from './config/gatewayConfig.js';
+import type { GatewayConfig, RetryPolicy } from './config/gatewayConfig.js';
 import type { RequestLogWriter } from './db/requestLogs.js';
 import type { KeyStore } from './http/auth.js';
 import { toPrismError } from './http/errors.js';
@@ -26,8 +26,10 @@ export interface AppOptions {
   budget: BudgetStore;
   /** Adapters for the providers named in the config. */
   providers: ProviderRegistry;
-  /** Limits applied to every provider call. */
+  /** Limits applied to every provider call; `deadlineMs` also caps all attempts of a request. */
   timeouts: CallTimeouts;
+  /** Overrides the retry policy from the gateway config (tests use a fast one). */
+  retry?: RetryPolicy;
   /** The expected `x-admin-token` value for `/admin/*`. */
   adminToken: string;
   /**
@@ -147,6 +149,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       budget: options.budget,
       providers: options.providers,
       timeouts: options.timeouts,
+      retry: options.retry ?? options.config.retry,
       track,
     }),
   );

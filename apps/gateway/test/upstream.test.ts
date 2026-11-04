@@ -12,6 +12,11 @@ afterEach(async () => {
   current = undefined;
 });
 
+/** Every provider in the chain gives the same outcome on every call. */
+function failEverywhere(t: TestApp, outcome: FakeOutcome): void {
+  for (const adapter of t.providers.adapters.values()) adapter.fallback = outcome;
+}
+
 function start(): TestApp {
   current = buildTestApp();
   return current;
@@ -151,7 +156,7 @@ describe('when the provider fails (edge cases 8.1, 8.5, 8.8, 8.13, 8.17)', () =>
     const t = start();
     const outcome: FakeOutcome =
       status === undefined ? { type: 'error', kind } : { type: 'error', kind, status };
-    t.providers.must('alpha').script.push(outcome);
+    failEverywhere(t, outcome);
 
     const res = await post(t);
 
@@ -175,17 +180,20 @@ describe('when the provider fails (edge cases 8.1, 8.5, 8.8, 8.13, 8.17)', () =>
 
   it('logs the failure with the provider and model that were tried, at zero cost', async () => {
     const t = start();
-    t.providers.must('alpha').script.push({ type: 'error', kind: 'server_error', status: 500 });
+    failEverywhere(t, { type: 'error', kind: 'server_error', status: 500 });
     await post(t);
 
     await waitForLogs(t.logs, 1);
+    // The last model tried is recorded: with every provider failing, that is the fallback.
     expect(t.logs.entries[0]).toMatchObject({
       status: 'upstream_error',
       httpStatus: 502,
       errorCode: 'upstream_error',
       requestedModel: 'fast',
-      resolvedModel: 'alpha-small',
-      resolvedProvider: 'alpha',
+      resolvedModel: 'beta-small',
+      resolvedProvider: 'beta',
+      fallback: true,
+      retries: 4,
     });
     expect(t.logs.entries[0]?.costUnits ?? 0n).toBe(0n);
   });
@@ -206,28 +214,29 @@ describe('when the provider fails (edge cases 8.1, 8.5, 8.8, 8.13, 8.17)', () =>
 
   it('answers a provider that never responds within the timeout, never hangs (edge case 8.1)', async () => {
     const t = start();
-    t.providers.must('alpha').fallback = { type: 'hang' };
+    failEverywhere(t, { type: 'hang' });
     const started = Date.now();
     const res = await post(t);
 
     expect(res.statusCode).toBe(502);
-    expect(Date.now() - started).toBeLessThan(1500);
-    expect(t.providers.must('alpha').calls).toHaveLength(1);
+    // Bounded by the request deadline (1.5 s in tests) however many attempts that allows.
+    expect(Date.now() - started).toBeLessThan(2200);
   });
 
   it('answers a slow provider (latency beyond the first-byte limit) within the limit, not after it', async () => {
     const t = start();
-    t.providers.must('alpha').script.push({ type: 'ok', latencyMs: 3000 });
+    failEverywhere(t, { type: 'ok', latencyMs: 3000 });
     const started = Date.now();
     const res = await post(t);
     expect(res.statusCode).toBe(502);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(Date.now() - started).toBeLessThan(2200);
   });
 
-  it('still serves the next request once the provider is back (no lingering state)', async () => {
+  it('still serves the next request once the providers are back (no lingering state)', async () => {
     const t = start();
-    t.providers.must('alpha').script.push({ type: 'error', kind: 'server_error', status: 500 });
+    failEverywhere(t, { type: 'error', kind: 'server_error', status: 500 });
     expect((await post(t)).statusCode).toBe(502);
+    failEverywhere(t, { type: 'ok' });
     expect((await post(t)).statusCode).toBe(200);
   });
 
@@ -242,7 +251,8 @@ describe('when the provider fails (edge cases 8.1, 8.5, 8.8, 8.13, 8.17)', () =>
     const quick = await post(t, {}, KEYS.research);
     expect(quick.statusCode).toBe(200);
     expect(Date.now() - started).toBeLessThan(200);
-    expect((await slow).statusCode).toBe(502);
+    // The hung attempt times out and is retried, which succeeds.
+    expect((await slow).statusCode).toBe(200);
   });
 
   it('turns an unexpected adapter exception into a generic 503 and releases the hold', async () => {

@@ -167,6 +167,9 @@ export function memoryBudget(logs: RequestLogWriter, events: Events = []): Memor
 /** Short limits so timeout tests finish quickly. */
 export const TEST_TIMEOUTS = { firstByteMs: 300, idleMs: 300, deadlineMs: 1500 };
 
+/** The configured policy (3 attempts, ×2) with backoff shrunk so tests stay fast. */
+export const FAST_RETRY = { maxAttempts: 3, initialBackoffMs: 10, backoffMultiplier: 2 };
+
 export interface TestApp {
   app: FastifyInstance;
   providers: FakeRegistry;
@@ -193,6 +196,7 @@ export function buildTestApp(overrides: Partial<AppOptions> = {}): TestApp {
     budget,
     providers,
     timeouts: TEST_TIMEOUTS,
+    retry: FAST_RETRY,
     adminToken: ADMIN_TOKEN,
     ...overrides,
   });
