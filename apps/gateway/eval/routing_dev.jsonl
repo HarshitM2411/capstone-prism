@@ -1,0 +1,80 @@
+{"id":"dev_s01","expected_tier":"fast","note":"short factoid","prompt":"What is the largest planet in our solar system?"}
+{"id":"dev_s02","expected_tier":"fast","note":"short conversion","prompt":"Convert 5 kilometers to miles."}
+{"id":"dev_s03","expected_tier":"fast","note":"short translation","prompt":"Translate 'thank you very much' into German."}
+{"id":"dev_s04","expected_tier":"fast","note":"short definition","prompt":"What does the acronym API stand for?"}
+{"id":"dev_s05","expected_tier":"fast","note":"short summary","prompt":"Give me a one-sentence summary of what Git is."}
+{"id":"dev_s06","expected_tier":"fast","note":"short grammar fix","prompt":"Fix the grammar in this sentence: 'Their going to the store tomorrow.'"}
+{"id":"dev_s07","expected_tier":"fast","note":"short factoid","prompt":"Who wrote the novel Pride and Prejudice?"}
+{"id":"dev_s08","expected_tier":"fast","note":"short arithmetic","prompt":"What is 15% of 240?"}
+{"id":"dev_s09","expected_tier":"fast","note":"short list","prompt":"List the days of the week in French."}
+{"id":"dev_s10","expected_tier":"fast","note":"short factoid","prompt":"What year did the Berlin Wall fall?"}
+{"id":"dev_s11","expected_tier":"fast","note":"short yes/no arithmetic","prompt":"Is 221 a prime number?"}
+{"id":"dev_s12","expected_tier":"fast","note":"short formatting","prompt":"Capitalize every word in this title: 'the quick brown fox jumps over the lazy dog'."}
+{"id":"dev_s13","expected_tier":"fast","note":"short factoid","prompt":"What is the chemical symbol for gold?"}
+{"id":"dev_s14","expected_tier":"fast","note":"short unit question","prompt":"How many ounces are in a pound?"}
+{"id":"dev_s15","expected_tier":"fast","note":"short easy writing","prompt":"Write a short friendly out-of-office reply."}
+{"id":"dev_s16","expected_tier":"fast","note":"short definition","prompt":"Define the word 'ephemeral'."}
+{"id":"dev_s17","expected_tier":"fast","note":"short technical definition","prompt":"What does the HTTP method PUT do?"}
+{"id":"dev_s18","expected_tier":"fast","note":"short extraction","prompt":"Extract all the phone numbers from this text: 'Call Maria at 555-0142 or Ben at 555-0199 after noon.'"}
+{"id":"dev_s19","expected_tier":"fast","note":"short sorting","prompt":"Sort these numbers from smallest to largest: 42, 7, 19, 88, 3."}
+{"id":"dev_s20","expected_tier":"fast","note":"short grammar","prompt":"What is the plural of 'cactus'?"}
+{"id":"dev_s21","expected_tier":"fast","note":"short rewrite","prompt":"Rewrite this sentence in the passive voice: 'The committee approved the budget.'"}
+{"id":"dev_s22","expected_tier":"fast","note":"short factoid","prompt":"What time zone is Tokyo in?"}
+{"id":"dev_s23","expected_tier":"fast","note":"short list","prompt":"Name three primary colors."}
+{"id":"dev_s24","expected_tier":"fast","note":"short synonym","prompt":"Give me a synonym for 'happy'."}
+{"id":"dev_s25","expected_tier":"fast","note":"short command lookup","prompt":"What command lists files in a directory on Linux?"}
+{"id":"dev_s26","expected_tier":"fast","note":"short creative","prompt":"Write a haiku about autumn."}
+{"id":"dev_s27","expected_tier":"fast","note":"trap: long input, trivial lookup","prompt":"Here is the team's sprint board: Ticket 101 - login bug - assigned to Alina - done; Ticket 102 - dark mode - assigned to Marcus - in progress; Ticket 103 - export to CSV - assigned to Yuki - blocked; Ticket 104 - password reset email - assigned to Omar - done; Ticket 105 - rate limit headers - assigned to Beatriz - in progress; Ticket 106 - audit log - assigned to Noor - not started. Who is assigned to ticket 105?"}
+{"id":"dev_s28","expected_tier":"fast","note":"trap: long input, trivial lookup","prompt":"The following is an invoice. Item: Standing desk, quantity 2, unit price 349.00. Item: Monitor arm, quantity 4, unit price 59.50. Item: Desk lamp, quantity 3, unit price 24.00. Shipping: 45.00. Tax rate: 8 percent. What is the unit price of the monitor arm?"}
+{"id":"dev_s29","expected_tier":"fast","note":"trap: long input, trivial lookup","prompt":"Read this changelog. Version 2.1.0 added dark mode and fixed three crashes on startup. Version 2.2.0 added CSV export and improved search speed. Version 2.3.0 added two-factor authentication and removed the legacy importer. Version 2.4.0 fixed timezone handling in reports and updated the onboarding flow. Which version added two-factor authentication?"}
+{"id":"dev_s30","expected_tier":"fast","note":"trap: long input, trivial lookup","prompt":"Meeting notes: Attendees were Gabriel, Hana, Ines, and Tomas. We reviewed the Q2 roadmap, agreed to postpone the mobile redesign, and decided that Hana will own the vendor evaluation. Ines will draft the hiring plan by Friday. Tomas will update the budget sheet. Who owns the vendor evaluation?"}
+{"id":"dev_s31","expected_tier":"fast","note":"trap: longer input, trivial rewrite","prompt":"Please rewrite the following paragraph so it reads more formally, keeping the same meaning: 'Hey team, just wanted to let you know the server thing is sorted now. It was a dumb config mistake on my end and I already pushed the fix. Sorry for the mess, and thanks for being patient while I figured it out.'"}
+{"id":"dev_s32","expected_tier":"fast","note":"trap: long input, trivial count","prompt":"Here is a list of fruits: apple, banana, cherry, date, elderberry, fig, grape, honeydew, kiwi, lemon, mango, nectarine, orange, papaya, quince, raspberry. How many fruits are in the list?"}
+{"id":"dev_s33","expected_tier":"fast","note":"trap: long input, trivial lookup","prompt":"Below is a short CSV. name,age,city / Alice,34,Lisbon / Bob,29,Oslo / Carla,41,Madrid / Dmitri,37,Prague / Esther,25,Dublin. What city does Carla live in?"}
+{"id":"dev_s34","expected_tier":"fast","note":"long input, one-sentence summary","prompt":"Summarize in one sentence: The city council met on Tuesday evening to discuss the new bike lane proposal. After two hours of public comment, the council voted 5 to 2 in favor of building the lanes along Main Street, with construction to begin in the spring."}
+{"id":"dev_s35","expected_tier":"fast","note":"long input, translation","prompt":"Translate the following sentence into Spanish: 'The meeting has been moved to Thursday at three in the afternoon, and lunch will be provided for everyone who attends.'"}
+{"id":"dev_s36","expected_tier":"fast","note":"long input, trivial sorting","prompt":"Here is a shopping list: milk, eggs, bread, butter, rice, beans, tomatoes, onions, garlic, chicken, apples, coffee. Put the items in alphabetical order."}
+{"id":"dev_s37","expected_tier":"fast","note":"short factoid","prompt":"What is the boiling point of water in Fahrenheit?"}
+{"id":"dev_s38","expected_tier":"fast","note":"short classification","prompt":"Is the following sentence a question or a statement? 'It is raining outside.'"}
+{"id":"dev_s39","expected_tier":"fast","note":"short easy writing","prompt":"Reply with a polite two-line decline to a meeting invitation for next Wednesday."}
+{"id":"dev_s40","expected_tier":"fast","note":"short string task","prompt":"Spell 'necessary' backwards."}
+{"id":"dev_c01","expected_tier":"smart","note":"trap: short but hard proof","prompt":"Prove that there are infinitely many prime numbers."}
+{"id":"dev_c02","expected_tier":"smart","note":"trap: short derivation","prompt":"Derive the quadratic formula by completing the square."}
+{"id":"dev_c03","expected_tier":"smart","note":"trap: short systems reasoning","prompt":"Why does TCP slow start make short-lived connections inefficient? Explain the mechanism and suggest mitigations."}
+{"id":"dev_c04","expected_tier":"smart","note":"trap: short estimation","prompt":"Estimate how many gas stations there are in Germany and walk me through your assumptions."}
+{"id":"dev_c05","expected_tier":"smart","note":"trap: short debugging","prompt":"A service's memory usage grows slowly over days and only in production. How would you track down the leak?"}
+{"id":"dev_c06","expected_tier":"smart","note":"short deep concurrency","prompt":"Explain why double-checked locking is broken without memory barriers, and how modern languages fix it."}
+{"id":"dev_c07","expected_tier":"smart","note":"design task","prompt":"Design a rate limiting system for a public API used by millions of clients, covering storage, algorithms, and failure modes."}
+{"id":"dev_c08","expected_tier":"smart","note":"comparison and recommendation","prompt":"Compare microservices and a modular monolith for a team of eight engineers, and recommend an approach with justification."}
+{"id":"dev_c09","expected_tier":"smart","note":"hard algorithm","prompt":"Write a function that finds the k-th largest element in an unsorted array in expected linear time, and explain its complexity."}
+{"id":"dev_c10","expected_tier":"smart","note":"migration planning","prompt":"Outline a plan to migrate a 5 TB PostgreSQL database to a new cluster with minimal downtime, including verification and rollback."}
+{"id":"dev_c11","expected_tier":"smart","note":"trap: short logic puzzle","prompt":"Three boxes are labeled 'apples', 'oranges', and 'mixed', but every label is wrong. You may draw one fruit from one box. How do you determine the contents of all boxes? Explain why this works."}
+{"id":"dev_c12","expected_tier":"smart","note":"trap: short induction proof","prompt":"Show that the sum of the first n odd numbers equals n squared, using induction."}
+{"id":"dev_c13","expected_tier":"smart","note":"trade-off question","prompt":"What are the trade-offs between optimistic and pessimistic concurrency control, and when would you pick each?"}
+{"id":"dev_c14","expected_tier":"smart","note":"expert debugging","prompt":"Our batch job's runtime tripled after we upgraded the JVM, with no code changes. What are the most probable causes, and how would you investigate each?"}
+{"id":"dev_c15","expected_tier":"smart","note":"deep data-structure question","prompt":"Explain how a B-tree maintains balance during insertions and deletions, and why databases prefer it over a binary search tree."}
+{"id":"dev_c16","expected_tier":"smart","note":"architecture design","prompt":"Design an event-driven architecture for processing payments reliably, including idempotency, ordering, and retries."}
+{"id":"dev_c17","expected_tier":"smart","note":"argued trade-off","prompt":"Is it better to normalize or denormalize a read-heavy analytics schema? Argue both sides and conclude."}
+{"id":"dev_c18","expected_tier":"smart","note":"hard data structure","prompt":"Implement an LRU cache with O(1) get and put, and explain why your data structures achieve that."}
+{"id":"dev_c19","expected_tier":"smart","note":"trap: short complexity derivation","prompt":"Derive the time complexity of merge sort using the recurrence relation."}
+{"id":"dev_c20","expected_tier":"smart","note":"deep distributed systems","prompt":"Explain the CAP theorem and what it implies for a shopping cart service during a network partition. Give a concrete example of an anomaly."}
+{"id":"dev_c21","expected_tier":"smart","note":"operational reasoning","prompt":"How would you detect and mitigate a thundering herd problem after a cache flush in a high-traffic system?"}
+{"id":"dev_c22","expected_tier":"smart","note":"trap: short proof","prompt":"Prove that the product of two odd integers is always odd."}
+{"id":"dev_c23","expected_tier":"smart","note":"prioritised strategy","prompt":"Create a step-by-step strategy for reducing cloud costs by 30% without hurting reliability, and prioritize the actions by impact."}
+{"id":"dev_c24","expected_tier":"smart","note":"trap: short estimation with calculation","prompt":"Estimate the storage needed to keep one year of video from 500 security cameras, showing your calculations and assumptions."}
+{"id":"dev_c25","expected_tier":"smart","note":"concurrency","prompt":"What causes deadlocks in a multithreaded program, how can they be detected, and how would you prevent them in a large codebase?"}
+{"id":"dev_c26","expected_tier":"smart","note":"comparison and recommendation","prompt":"Analyze the pros and cons of using GraphQL instead of REST for a mobile app with unreliable networks, then recommend one."}
+{"id":"dev_c27","expected_tier":"smart","note":"machine learning reasoning","prompt":"Explain how gradient descent can fail to converge, and describe techniques that address each failure mode."}
+{"id":"dev_c28","expected_tier":"smart","note":"query with explanation","prompt":"Write a SQL query to find the second highest salary per department, and explain how it handles ties."}
+{"id":"dev_c29","expected_tier":"smart","note":"distributed systems","prompt":"Walk through how a leaderless replicated database resolves conflicting writes during a partition, and discuss the anomalies clients may see."}
+{"id":"dev_c30","expected_tier":"smart","note":"failure analysis","prompt":"A distributed lock service sometimes grants the same lock to two clients. List the likely failure scenarios and how you would prevent each."}
+{"id":"dev_c31","expected_tier":"smart","note":"long code review, hard","prompt":"Here is a function: def transfer(a, b, amount): if a.balance >= amount: a.balance -= amount; b.balance += amount; return True; return False. It is called concurrently from many threads and sometimes balances go negative or money vanishes. Explain every concurrency problem in this code and propose a robust fix with trade-offs."}
+{"id":"dev_c32","expected_tier":"smart","note":"long incident, hard","prompt":"We run a three-tier web application with a load balancer, twelve application servers, a primary database with two replicas, and a Redis cache. Last week, during a traffic spike, response times degraded for twenty minutes even though CPU stayed under 50 percent. Propose the most plausible bottlenecks and a systematic way to isolate each one."}
+{"id":"dev_c33","expected_tier":"smart","note":"long planning, hard","prompt":"Our company has 200 engineers across five time zones, a monolithic codebase of three million lines, and releases every two weeks with frequent rollbacks. Propose a plan to move to continuous delivery over twelve months, including organizational changes, tooling, risk management, and success metrics."}
+{"id":"dev_c34","expected_tier":"smart","note":"long system design","prompt":"Consider a social network with 50 million users where each user follows on average 200 accounts. Design the home feed system, discussing fan-out on write versus fan-out on read, storage, ranking, and the celebrity problem."}
+{"id":"dev_c35","expected_tier":"smart","note":"trap: short theory","prompt":"Why is the halting problem undecidable? Give the core argument."}
+{"id":"dev_c36","expected_tier":"smart","note":"short deep distributed systems","prompt":"Explain Raft leader election and why it guarantees at most one leader per term."}
+{"id":"dev_c37","expected_tier":"smart","note":"short numeric subtlety","prompt":"Why do floating-point sums depend on the order of addition, and how can that cause bugs in parallel code?"}
+{"id":"dev_c38","expected_tier":"smart","note":"short open-ended judgement","prompt":"How would you make a recommendation system fair across user groups? Discuss the trade-offs."}
+{"id":"dev_c39","expected_tier":"smart","note":"trap: short graph proof","prompt":"Prove that a graph with n vertices and no cycles has at most n-1 edges."}
+{"id":"dev_c40","expected_tier":"smart","note":"security reasoning","prompt":"What are the security risks of JWT-based sessions and how would you mitigate each?"}

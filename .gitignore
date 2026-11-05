@@ -19,3 +19,6 @@ Thumbs.db
 # Python caches from the starter scripts
 __pycache__/
 *.pyc
+
+# Downloaded embedding models (fetched from Hugging Face on first use)
+.models/

@@ -1,5 +1,6 @@
 # Build context is the repository root (see docker-compose.yml).
-FROM node:22-alpine
+# Debian (glibc), not Alpine: the embedding runtime (onnxruntime) ships glibc binaries only.
+FROM node:22-slim
 RUN npm install -g pnpm@12.16.1
 WORKDIR /repo
 
@@ -14,6 +15,12 @@ COPY tsconfig.base.json ./
 COPY packages packages
 COPY apps/gateway apps/gateway
 RUN pnpm --filter @prism/shared-types --filter @prism/gateway build
+
+# The embedding model is part of the image: no download at runtime, so a cold start (and a
+# network-less deployment) still routes and caches with it. Its own layer, so code changes do not
+# trigger another download.
+ENV EMBEDDING_CACHE_DIR=/models
+RUN node apps/gateway/dist/cli/fetchModel.js
 
 ENV NODE_ENV=production
 EXPOSE 8080

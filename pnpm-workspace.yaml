@@ -3,3 +3,5 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+  onnxruntime-node: true
+  protobufjs: false

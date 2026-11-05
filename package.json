@@ -10,6 +10,7 @@
   "scripts": {
     "dev:gateway": "pnpm --filter @prism/gateway dev",
     "dev:console": "pnpm --filter @prism/console dev",
+    "routing:eval": "pnpm --filter @prism/gateway routing:eval",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",

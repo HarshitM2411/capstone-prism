@@ -6,6 +6,7 @@ import type { KeyStore } from './http/auth.js';
 import { toPrismError } from './http/errors.js';
 import type { BudgetStore } from './limits/budget.js';
 import type { RateLimiter } from './limits/rpm.js';
+import { DifficultyClassifier, type Classifier } from './routing/classifier.js';
 import type { CallTimeouts, ProviderRegistry } from './providers/types.js';
 import { adminRoutes } from './routes/admin.js';
 import { chatRoutes } from './routes/chat.js';
@@ -26,6 +27,8 @@ export interface AppOptions {
   budget: BudgetStore;
   /** Adapters for the providers named in the config. */
   providers: ProviderRegistry;
+  /** Decides the tier of `auto` requests (default: structural signals only, no embeddings). */
+  classifier?: Classifier;
   /** Limits applied to every provider call; `deadlineMs` also caps all attempts of a request. */
   timeouts: CallTimeouts;
   /** Overrides the retry policy from the gateway config (tests use a fast one). */
@@ -150,6 +153,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       rateLimiter: options.rateLimiter,
       budget: options.budget,
       providers: options.providers,
+      classifier: options.classifier ?? new DifficultyClassifier(null),
       timeouts: options.timeouts,
       retry: options.retry ?? options.config.retry,
       streamMaxMs: options.streamMaxMs ?? 120_000,

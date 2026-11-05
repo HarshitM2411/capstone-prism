@@ -29,7 +29,8 @@ import {
   executeWithFailover,
   type AttemptFailure,
 } from '../routing/executor.js';
-import { resolveModel } from '../routing/resolve.js';
+import type { Classifier } from '../routing/classifier.js';
+import { resolveModel, type ResolvedModel } from '../routing/resolve.js';
 import {
   WordCounter,
   createSseBody,
@@ -44,6 +45,8 @@ export interface ChatRouteDeps {
   rateLimiter: RateLimiter;
   budget: BudgetStore;
   providers: ProviderRegistry;
+  /** Decides the tier for `auto` requests. */
+  classifier: Classifier;
   timeouts: CallTimeouts;
   retry: RetryPolicy;
   /** The longest one streamed response may last. */
@@ -88,6 +91,7 @@ export const chatRoutes =
         resolvedProvider: null,
         fallback: false,
         retries: 0,
+        routeReason: null,
         logStatus: 'ok',
         errorCode: null,
         logged: false,
@@ -141,6 +145,7 @@ export const chatRoutes =
           status: ctx.logStatus,
           httpStatus: reply.statusCode,
           errorCode: ctx.errorCode,
+          routeReason: ctx.routeReason,
           latencyMs: reply.elapsedTime,
         })
         .catch((err: unknown) => {
@@ -160,6 +165,44 @@ export const chatRoutes =
         throw rateLimiterUnavailable();
       }
       if (!decision.allowed) throw rateLimitExceeded(decision.retryAfterMs);
+    }
+
+    /**
+     * Step 6: for `auto`, pick the tier. The reason is recorded before anything else can reject
+     * the request, so a later 402 or 403 still leaves it in the log (edge case 6.15). The chosen
+     * tier must be allowed for the key: a `smart` verdict downgrades to `fast` if that is all the
+     * key may use (and says so in the reason), otherwise the request is refused (edge case 3.2).
+     */
+    async function routeAuto(
+      request: FastifyRequest,
+      ctx: RequestContext,
+      chat: ChatRequest,
+    ): Promise<ResolvedModel> {
+      const tiers = deps.config.auto!;
+      let tier: string;
+      let reason: string;
+      try {
+        const verdict = await deps.classifier.classify(chat.messages);
+        tier = verdict.difficulty === 'complex' ? tiers.complex : tiers.simple;
+        reason = verdict.reason;
+      } catch (err) {
+        // The classifier is built not to fail; if it does, the safe answer is the strong tier.
+        request.log.error({ err, requestId: ctx.requestId }, 'classifier failed');
+        tier = tiers.complex;
+        reason = 'classifier error: using the strong tier';
+      }
+      ctx.routeReason = `${tier}: ${reason}`;
+
+      const allowed = ctx.auth!.allowedModels;
+      if (!allowed.includes(tier)) {
+        if (tier !== tiers.simple && allowed.includes(tiers.simple)) {
+          ctx.routeReason = `${tiers.simple}: downgraded from ${tier} (not allowed for this key); ${reason}`;
+          tier = tiers.simple;
+        } else {
+          throw modelNotAllowed(tier);
+        }
+      }
+      return { kind: 'alias', name: tier };
     }
 
     /**
@@ -257,6 +300,7 @@ export const chatRoutes =
         promptTokens,
         completionTokens,
         costUnits,
+        routeReason: ctx.routeReason,
         latencyMs: reply.elapsedTime,
       });
       ctx.logged = true;
@@ -338,6 +382,7 @@ export const chatRoutes =
           completionTokens: usage.completionTokens,
           costUnits,
           usageEstimated: estimated,
+          routeReason: ctx.routeReason,
           latencyMs: reply.elapsedTime,
           timeToFirstTokenMs: summary.timeToFirstTokenMs,
         };
@@ -416,8 +461,9 @@ export const chatRoutes =
       // Step 5: requests per minute.
       await enforceRateLimit(request, ctx);
 
-      // (Step 6, `auto` classification, arrives in Phase 7.)
-      ctx.resolvedModel = pricingModel(deps.config, resolved).name;
+      // Step 6: `auto` becomes a concrete tier; from here on it is treated like a named alias.
+      const route = resolved.kind === 'auto' ? await routeAuto(request, ctx, chat) : resolved;
+      ctx.resolvedModel = pricingModel(deps.config, route).name;
 
       // Step 7: reserve budget. Nothing is held when this rejects.
       let reservation: Reservation | null;
@@ -426,7 +472,7 @@ export const chatRoutes =
           requestId: ctx.requestId,
           keyId: auth.keyId,
           budgetUnits: auth.monthlyBudgetUnits,
-          estimateUnits: estimateCostUnits(deps.config, resolved, chat),
+          estimateUnits: estimateCostUnits(deps.config, route, chat),
         });
       } catch (err) {
         request.log.error({ err, keyId: auth.keyId }, 'budget store unavailable');
@@ -442,7 +488,7 @@ export const chatRoutes =
           reply,
           ctx,
           chat,
-          chain: modelChain(deps.config, resolved),
+          chain: modelChain(deps.config, route),
           reservation,
         };
         return await (chat.stream ? respondStreaming(admitted) : respondComplete(admitted));

@@ -124,6 +124,33 @@ describe('loadEnv', () => {
     });
   });
 
+  describe('embedding settings', () => {
+    it('default to the bundled local model with a short timeout', () => {
+      const env = loadEnv(base);
+      expect(env.embeddingModel).toBe('Xenova/all-MiniLM-L6-v2');
+      expect(env.embeddingTimeoutMs).toBe(1500);
+      expect(env.embeddingCacheDir).toMatch(/\.models$/);
+    });
+
+    it('can be overridden and are validated', () => {
+      const env = loadEnv({
+        ...base,
+        EMBEDDING_MODEL: 'Xenova/other',
+        EMBEDDING_CACHE_DIR: '/models',
+        EMBEDDING_TIMEOUT_MS: '800',
+      });
+      expect(env).toMatchObject({
+        embeddingModel: 'Xenova/other',
+        embeddingCacheDir: '/models',
+        embeddingTimeoutMs: 800,
+      });
+      expect(() => loadEnv({ ...base, EMBEDDING_TIMEOUT_MS: 'soon' })).toThrow(
+        /EMBEDDING_TIMEOUT_MS/,
+      );
+      expect(() => loadEnv({ ...base, EMBEDDING_TIMEOUT_MS: '1' })).toThrow(/EMBEDDING_TIMEOUT_MS/);
+    });
+  });
+
   describe('ADMIN_TOKEN', () => {
     it('is required', () => {
       expect(() => loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS })).toThrow(

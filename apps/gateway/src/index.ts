@@ -5,6 +5,8 @@ import { checkDatabase, createPool } from './db/pool.js';
 import { createRequestLogWriter } from './db/requestLogs.js';
 import { PgBudgetStore, reconcileStaleReservations } from './limits/budget.js';
 import { RedisRateLimiter } from './limits/rpm.js';
+import { WorkerEmbedder } from './embeddings/workerEmbedder.js';
+import { DifficultyClassifier } from './routing/classifier.js';
 import { createProviderRegistry } from './providers/registry.js';
 import { checkRedis, createRedis } from './redis.js';
 import { describeConfig, loadAllConfig, prepareDatabase, type LoadedConfig } from './startup.js';
@@ -44,6 +46,14 @@ async function main(): Promise<void> {
     commandTimeoutMs: env.redisTimeoutMs,
     onError: (err) => app.log.warn({ err: err.message }, 'redis error'),
   });
+  // The embedding model loads in a worker thread. Until it is ready (or if it cannot load), `auto`
+  // routes on structural signals alone and the reason says so.
+  const embedder = new WorkerEmbedder({
+    model: env.embeddingModel,
+    cacheDir: env.embeddingCacheDir,
+    timeoutMs: env.embeddingTimeoutMs,
+  });
+  const classifier = new DifficultyClassifier(embedder);
   const app = buildApp({
     logLevel: env.logLevel,
     config: loaded.config,
@@ -52,6 +62,7 @@ async function main(): Promise<void> {
     rateLimiter: new RedisRateLimiter(redis),
     budget: new PgBudgetStore(pool),
     providers: createProviderRegistry(loaded.config),
+    classifier,
     timeouts: {
       firstByteMs: env.providerFirstByteTimeoutMs,
       idleMs: env.providerIdleTimeoutMs,
@@ -66,6 +77,14 @@ async function main(): Promise<void> {
   });
 
   app.log.info(describeConfig(loaded.config), 'gateway configuration loaded');
+  classifier.warm().then(
+    () => app.log.info({ model: env.embeddingModel }, 'embedding model ready'),
+    (err: unknown) =>
+      app.log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'embedding model unavailable: auto routing uses structural signals only',
+      ),
+  );
 
   // 2. Storage: wait for Postgres, migrate, verify pgvector, seed tenants.
   try {
@@ -99,6 +118,7 @@ async function main(): Promise<void> {
     clearInterval(reconciler);
     try {
       await app.close();
+      await embedder.close();
       await pool.end();
       redis.disconnect();
       process.exit(0);

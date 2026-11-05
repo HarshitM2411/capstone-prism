@@ -271,6 +271,42 @@ describe('end to end against Postgres: auth → validation → resolution → lo
     expect(holds).toHaveLength(0);
   });
 
+  it('stores the route reason of `auto` requests, with the resolved model (Phase 7)', async () => {
+    const instance = appFor(pool);
+    const key = 'prism-sk-research-4d5e6f';
+    const hard = 'Prove that the square root of 2 is irrational. SECRET-PROMPT-MARKER';
+    await post(instance, key, { model: 'auto', messages: [{ role: 'user', content: hard }] });
+    await post(instance, key, {
+      model: 'auto',
+      messages: [{ role: 'user', content: 'What is the capital of Italy?' }],
+    });
+    // Not `auto`: no route reason.
+    await post(instance, key, body);
+    // `auto` is not on this key's allowlist: refused before any classification.
+    await post(instance, 'prism-sk-search-1a2b3c', {
+      model: 'auto',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+
+    const rows = (await logs()) as (LogRow & { route_reason: string | null })[];
+    const byModel = (name: string) => rows.filter((r) => r.resolved_model === name);
+    const smart = byModel('alpha-large');
+    expect(smart).toHaveLength(1);
+    expect(smart[0]).toMatchObject({ requested_model: 'auto', status: 'ok' });
+    expect(smart[0]!.route_reason).toMatch(/^smart: score/);
+    expect(smart[0]!.route_reason).not.toContain('SECRET-PROMPT-MARKER');
+
+    const fast = rows.filter(
+      (r) => r.requested_model === 'auto' && r.resolved_model === 'alpha-small',
+    );
+    expect(fast).toHaveLength(1);
+    expect(fast[0]!.route_reason).toMatch(/^fast: score/);
+
+    expect(rows.find((r) => r.requested_model === 'fast')!.route_reason).toBeNull();
+    const refused = rows.find((r) => r.status === 'rejected_allowlist')!;
+    expect(refused.route_reason).toBeNull();
+  });
+
   it('returns the admin ping only with the token', async () => {
     const instance = appFor(pool);
     const ok = await instance.inject({

@@ -21,6 +21,8 @@ export interface RequestContext {
   fallback: boolean;
   /** Same-model retries made so far. */
   retries: number;
+  /** For `auto` requests: the chosen tier and why. Written to `request_logs.route_reason`. */
+  routeReason: string | null;
   logStatus: LogStatus;
   errorCode: string | null;
   /** The log row was already written (together with the budget settlement), or is owned elsewhere. */

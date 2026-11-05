@@ -7,6 +7,7 @@
  * error messages never echo a secret value back.
  */
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_EMBEDDING_MODEL } from '../embeddings/embedCore.js';
 import { Secret } from '../secret.js';
 
 export interface Env {
@@ -35,6 +36,12 @@ export interface Env {
   requestDeadlineMs: number;
   /** Cap on the total duration of one streamed response (a long answer may outlast the deadline). */
   streamMaxDurationMs: number;
+  /** Hugging Face model id of the local embedding model (router and, later, semantic cache). */
+  embeddingModel: string;
+  /** Where the model files are stored (baked into the Docker image, so no download at runtime). */
+  embeddingCacheDir: string;
+  /** The longest one embedding call may take before callers fall back (edge case 6.9). */
+  embeddingTimeoutMs: number;
   /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
   adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
@@ -45,6 +52,11 @@ const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'
 
 /** `<repo>/data`, resolved from this file so it works from `src/` (dev) and `dist/` (built). */
 const DEFAULT_DATA_DIR = fileURLToPath(new URL('../../../../data', import.meta.url));
+
+/** <repo>/.models, resolved from this file so it works from src/ (dev) and dist/ (built). */
+export const DEFAULT_EMBEDDING_CACHE_DIR = fileURLToPath(
+  new URL('../../../../.models', import.meta.url),
+);
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -191,6 +203,9 @@ export function loadEnv(
     providerIdleTimeoutMs: parseInteger(source, 'PROVIDER_IDLE_TIMEOUT_MS', 10_000, 100, 120_000),
     requestDeadlineMs,
     streamMaxDurationMs,
+    embeddingModel: source.EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL,
+    embeddingCacheDir: source.EMBEDDING_CACHE_DIR?.trim() || DEFAULT_EMBEDDING_CACHE_DIR,
+    embeddingTimeoutMs: parseInteger(source, 'EMBEDDING_TIMEOUT_MS', 1500, 50, 30_000),
     adminToken,
     dataDir,
     gatewayConfigFile,
