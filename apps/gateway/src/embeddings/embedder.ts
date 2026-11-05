@@ -5,6 +5,11 @@
 export interface Embedder {
   /** Length of every vector. The cache table's `vector(384)` column must match it. */
   readonly dimensions: number;
+  /**
+   * Whether the model is loaded right now, without waiting. Callers on the request path use it to
+   * skip optional work (the cache) while the model is still starting, instead of waiting for it.
+   */
+  isReady?(): boolean;
   /** Resolves when the model is loaded; rejects if it cannot be. Safe to call repeatedly. */
   ready(): Promise<void>;
   /** A normalised embedding, so cosine similarity is a plain dot product. Rejects on failure. */

@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { ConfigError, loadEnv, type Env } from './config/env.js';
 import { findKeyByRawKey } from './db/keys.js';
 import { checkDatabase, createPool } from './db/pool.js';
+import { PgCacheStore } from './cache/store.js';
 import { createRequestLogWriter } from './db/requestLogs.js';
 import { PgBudgetStore, reconcileStaleReservations } from './limits/budget.js';
 import { RedisRateLimiter } from './limits/rpm.js';
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     timeoutMs: env.embeddingTimeoutMs,
   });
   const classifier = new DifficultyClassifier(embedder);
+  const cache = new PgCacheStore(pool, env.cacheTtlMs);
   const app = buildApp({
     logLevel: env.logLevel,
     config: loaded.config,
@@ -63,6 +65,8 @@ async function main(): Promise<void> {
     budget: new PgBudgetStore(pool),
     providers: createProviderRegistry(loaded.config),
     classifier,
+    cache,
+    embedder,
     timeouts: {
       firstByteMs: env.providerFirstByteTimeoutMs,
       idleMs: env.providerIdleTimeoutMs,
@@ -104,6 +108,8 @@ async function main(): Promise<void> {
     try {
       const cleared = await reconcileStaleReservations(pool, staleAfterMs);
       if (cleared > 0) app.log.warn({ cleared }, 'released stale budget reservations');
+      const expired = await cache.deleteExpired();
+      if (expired > 0) app.log.info({ expired }, 'removed expired cache entries');
     } catch (err) {
       app.log.error({ err }, 'budget reservation reconciliation failed');
     }

@@ -4,6 +4,8 @@ import type { GatewayConfig, RetryPolicy } from './config/gatewayConfig.js';
 import type { RequestLogWriter } from './db/requestLogs.js';
 import type { KeyStore } from './http/auth.js';
 import { toPrismError } from './http/errors.js';
+import type { CacheStore } from './cache/store.js';
+import type { Embedder } from './embeddings/embedder.js';
 import type { BudgetStore } from './limits/budget.js';
 import type { RateLimiter } from './limits/rpm.js';
 import { DifficultyClassifier, type Classifier } from './routing/classifier.js';
@@ -29,6 +31,10 @@ export interface AppOptions {
   providers: ProviderRegistry;
   /** Decides the tier of `auto` requests (default: structural signals only, no embeddings). */
   classifier?: Classifier;
+  /** Semantic cache storage. Without it (or without an `embedder`) the cache is off. */
+  cache?: CacheStore;
+  /** Turns prompts into vectors for the cache. */
+  embedder?: Embedder;
   /** Limits applied to every provider call; `deadlineMs` also caps all attempts of a request. */
   timeouts: CallTimeouts;
   /** Overrides the retry policy from the gateway config (tests use a fast one). */
@@ -154,13 +160,15 @@ export function buildApp(options: AppOptions): FastifyInstance {
       budget: options.budget,
       providers: options.providers,
       classifier: options.classifier ?? new DifficultyClassifier(null),
+      cache: options.cache ?? null,
+      embedder: options.embedder ?? null,
       timeouts: options.timeouts,
       retry: options.retry ?? options.config.retry,
       streamMaxMs: options.streamMaxMs ?? 120_000,
       track,
     }),
   );
-  void app.register(adminRoutes({ adminToken: options.adminToken }));
+  void app.register(adminRoutes({ adminToken: options.adminToken, cache: options.cache ?? null }));
 
   return app;
 }

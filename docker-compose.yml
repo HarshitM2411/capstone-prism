@@ -94,6 +94,7 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/all-MiniLM-L6-v2}
       EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-1500}
       EMBEDDING_CACHE_DIR: /models
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-86400}
       DATABASE_URL: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@postgres:5432/${POSTGRES_DB:-prism}
       REDIS_URL: redis://redis:6379
       DATA_DIR: /data

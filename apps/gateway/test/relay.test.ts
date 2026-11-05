@@ -307,3 +307,45 @@ describe('the SSE relay', () => {
     expect(harness.aborted()).toBeGreaterThan(0);
   });
 });
+
+describe('collecting the text for the cache', () => {
+  it('keeps the full text and finish reason of a stream that completed', async () => {
+    const harness = await source([text('Hello '), text('world', 'stop')]);
+    const r = relay(harness, { collectMaxChars: 100 });
+    await readAll(r.body);
+    await r.done;
+    expect(r.ends[0]).toMatchObject({
+      end: 'complete',
+      content: 'Hello world',
+      finishReason: 'stop',
+    });
+  });
+
+  it('keeps nothing unless asked to', async () => {
+    const harness = await source([text('Hello', 'stop')]);
+    const r = relay(harness);
+    await readAll(r.body);
+    await r.done;
+    expect(r.ends[0]!.content).toBeNull();
+  });
+
+  it('gives up on an answer larger than the cap', async () => {
+    const harness = await source([text('aaaa'), text('bbbb', 'stop')]);
+    const r = relay(harness, { collectMaxChars: 6 });
+    await readAll(r.body);
+    await r.done;
+    expect(r.ends[0]!.end).toBe('complete');
+    expect(r.ends[0]!.content).toBeNull();
+  });
+
+  it('never offers the text of a stream that failed midway', async () => {
+    const harness = await source([text('partial ')], {
+      error: new ProviderError('server_error', 'alpha', 'boom', 500),
+    });
+    const r = relay(harness, { collectMaxChars: 100 });
+    await readAll(r.body);
+    await r.done;
+    expect(r.ends[0]!.end).toBe('upstream_failed');
+    expect(r.ends[0]!.content).toBeNull();
+  });
+});

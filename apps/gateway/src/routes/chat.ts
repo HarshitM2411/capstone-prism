@@ -1,6 +1,13 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { GatewayConfig, ModelInfo, RetryPolicy } from '../config/gatewayConfig.js';
 import type { RequestLogEntry, RequestLogWriter } from '../db/requestLogs.js';
+import { cacheScope, isTimeSensitive, similarityMessage, type CacheScope } from '../cache/scope.js';
+import {
+  MAX_CACHED_CHARS,
+  type CacheHit,
+  type CacheStore,
+  type CachedResponse,
+} from '../cache/store.js';
 import { authenticate, type KeyStore } from '../http/auth.js';
 import type { RequestContext } from '../http/context.js';
 import {
@@ -15,6 +22,7 @@ import {
   serviceUnavailable,
   upstreamError,
 } from '../http/errors.js';
+import type { Embedder } from '../embeddings/embedder.js';
 import { fillMissingPrismHeaders, setPrismHeaders } from '../http/headers.js';
 import { validateChatRequest, type ChatRequest } from '../http/validate.js';
 import type { BudgetStore, Reservation } from '../limits/budget.js';
@@ -31,6 +39,7 @@ import {
 } from '../routing/executor.js';
 import type { Classifier } from '../routing/classifier.js';
 import { resolveModel, type ResolvedModel } from '../routing/resolve.js';
+import { replayAsSse } from '../streaming/replay.js';
 import {
   WordCounter,
   createSseBody,
@@ -47,6 +56,10 @@ export interface ChatRouteDeps {
   providers: ProviderRegistry;
   /** Decides the tier for `auto` requests. */
   classifier: Classifier;
+  /** The semantic cache; `null` disables it for every key. */
+  cache: CacheStore | null;
+  /** Turns the prompt into a vector for the cache; `null` disables the cache. */
+  embedder: Embedder | null;
   timeouts: CallTimeouts;
   retry: RetryPolicy;
   /** The longest one streamed response may last. */
@@ -63,6 +76,16 @@ interface Admitted {
   chat: ChatRequest;
   chain: readonly ModelInfo[];
   reservation: Reservation;
+  /** Present when this request missed the cache and may store its answer. */
+  cache: CacheTarget | null;
+}
+
+/** Where a cache miss will be stored, decided at lookup time. */
+interface CacheTarget {
+  keyId: number;
+  alias: string;
+  scope: CacheScope;
+  embedding: number[];
 }
 
 /** Prompt size by the same rule as the mock providers: whitespace-separated words. */
@@ -206,6 +229,154 @@ export const chatRoutes =
     }
 
     /**
+     * Step 8: the semantic cache. Eligible only for a key with the cache on, and for a prompt that
+     * is not time-sensitive. Any failure here (model not ready, embedding error, database error) is
+     * a miss: the cache never fails or delays a request beyond the embedding timeout.
+     */
+    async function lookupCache(
+      request: FastifyRequest,
+      ctx: RequestContext,
+      chat: ChatRequest,
+      alias: string,
+    ): Promise<{ hit: CacheHit | null; target: CacheTarget | null }> {
+      const none = { hit: null, target: null };
+      const { cache, embedder } = deps;
+      const policy = ctx.auth!.cache;
+      if (cache === null || embedder === null || !policy.enabled || policy.threshold === null) {
+        return none;
+      }
+      const scope = cacheScope(chat);
+      const prompt = similarityMessage(chat.messages);
+      if (scope === null || prompt === null || isTimeSensitive(prompt.content)) return none;
+      // While the model is still loading, answer without the cache instead of waiting for it.
+      if (embedder.isReady?.() === false) return none;
+
+      let embedding: number[];
+      try {
+        embedding = await embedder.embed(scope.text);
+      } catch (err) {
+        request.log.warn({ err, requestId: ctx.requestId }, 'cache embedding failed (miss)');
+        return none;
+      }
+      const target: CacheTarget = { keyId: ctx.auth!.keyId, alias, scope, embedding };
+      try {
+        const hit = await cache.lookup({
+          keyId: target.keyId,
+          alias,
+          contextHash: scope.contextHash,
+          embedding,
+          threshold: policy.threshold,
+        });
+        return { hit, target };
+      } catch (err) {
+        request.log.warn({ err, requestId: ctx.requestId }, 'cache lookup failed (miss)');
+        return { hit: null, target };
+      }
+    }
+
+    /** Stores a successful answer in the background; a failure only produces a log line. */
+    function storeInCache(
+      request: FastifyRequest,
+      target: CacheTarget | null,
+      response: CachedResponse,
+    ): void {
+      if (target === null || deps.cache === null) return;
+      deps.track(
+        deps.cache
+          .write({
+            keyId: target.keyId,
+            alias: target.alias,
+            contextHash: target.scope.contextHash,
+            promptText: target.scope.text,
+            embedding: target.embedding,
+            response,
+          })
+          .catch((err: unknown) => {
+            request.log.warn({ err }, 'cache write failed');
+          }),
+      );
+    }
+
+    /**
+     * A cache hit: no provider call. The reservation is settled at zero (which releases the hold)
+     * together with the log row. A stream is replayed as one content chunk and `[DONE]`.
+     */
+    async function respondFromCache(admitted: Admitted, hit: CacheHit) {
+      const { reply, ctx, chat, reservation } = admitted;
+      const cached = hit.response;
+      ctx.resolvedModel = cached.model;
+      ctx.resolvedProvider = cached.provider;
+
+      await deps.budget.settle(reservation, 0n, {
+        requestId: ctx.requestId,
+        keyId: ctx.auth!.keyId,
+        requestedModel: ctx.requestedModel,
+        resolvedModel: cached.model,
+        resolvedProvider: cached.provider,
+        fallback: false,
+        retries: 0,
+        status: 'cache_hit',
+        httpStatus: 200,
+        errorCode: null,
+        promptTokens: 0,
+        completionTokens: 0,
+        costUnits: 0n,
+        cache: 'hit',
+        routeReason: ctx.routeReason,
+        latencyMs: reply.elapsedTime,
+      });
+      ctx.logged = true;
+
+      // `provider/model` names who originally produced the answer; `x-prism-cache: hit` says it
+      // was not produced again.
+      setPrismHeaders(reply, {
+        provider: `${cached.provider}/${cached.model}`,
+        cache: 'hit',
+        fallback: false,
+        costUnits: chat.stream ? null : 0n,
+      });
+      const id = `chatcmpl-${ctx.requestId.replaceAll('-', '').slice(0, 24)}`;
+      const created = Math.floor(Date.now() / 1000);
+
+      if (chat.stream) {
+        return reply
+          .header('content-type', 'text/event-stream; charset=utf-8')
+          .header('cache-control', 'no-cache, no-transform')
+          .header('x-accel-buffering', 'no')
+          .send(
+            replayAsSse({
+              id,
+              created,
+              model: chat.model,
+              content: cached.content,
+              finishReason: cached.finishReason,
+              includeUsage: chat.includeUsage,
+              promptTokens: cached.promptTokens,
+              completionTokens: cached.completionTokens,
+            }),
+          );
+      }
+      return reply.send({
+        id,
+        object: 'chat.completion',
+        created,
+        model: chat.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: cached.content },
+            finish_reason: cached.finishReason,
+          },
+        ],
+        usage: {
+          prompt_tokens: cached.promptTokens,
+          completion_tokens: cached.completionTokens,
+          total_tokens: cached.promptTokens + cached.completionTokens,
+        },
+      });
+    }
+
+    /**
      * Step 9: runs the provider call (plain or up to the first stream chunk) through the retry /
      * failover engine, bounded by the request deadline. If nothing answers, the client gets a
      * generic `502` (nothing is billed; the caller releases the hold). The provider's own
@@ -261,7 +432,7 @@ export const chatRoutes =
 
     /** A non-streaming request: the complete answer, billed from the provider's usage. */
     async function respondComplete(admitted: Admitted) {
-      const { reply, ctx, chat, chain, reservation } = admitted;
+      const { request, reply, ctx, chat, chain, reservation } = admitted;
       const result = await callProvider(admitted, (signal, onAttemptFailed) =>
         executeWithFailover({
           chain,
@@ -304,6 +475,16 @@ export const chatRoutes =
         latencyMs: reply.elapsedTime,
       });
       ctx.logged = true;
+
+      // A complete, successful answer (fallback-served ones too) is stored for later hits.
+      storeInCache(request, admitted.cache, {
+        content: result.response.content,
+        finishReason: result.response.finishReason,
+        promptTokens,
+        completionTokens,
+        provider: served.provider,
+        model: served.name,
+      });
 
       setPrismHeaders(reply, {
         provider: `${served.provider}/${served.name}`,
@@ -394,6 +575,17 @@ export const chatRoutes =
         }
         try {
           await deps.budget.settle(reservation, costUnits, entry);
+          // Only a stream that ran to its end is cached: never a partial or aborted one.
+          if (summary.end === 'complete' && summary.content !== null && summary.content !== '') {
+            storeInCache(request, admitted.cache, {
+              content: summary.content,
+              finishReason: summary.finishReason ?? 'stop',
+              promptTokens: usage.promptTokens,
+              completionTokens: usage.completionTokens,
+              provider: served.provider,
+              model: served.name,
+            });
+          }
         } catch (err) {
           request.log.error(
             { err, requestId: ctx.requestId },
@@ -411,6 +603,7 @@ export const chatRoutes =
         model: chat.model,
         includeUsage: chat.includeUsage,
         promptTokensEstimate: promptEstimate,
+        collectMaxChars: admitted.cache === null ? 0 : MAX_CACHED_CHARS,
         maxDurationMs: deps.streamMaxMs,
         elapsedMs: () => reply.elapsedTime,
         onEnd: finish,
@@ -482,7 +675,8 @@ export const chatRoutes =
 
       // From here on the reservation must be settled or released, whatever happens.
       try {
-        // Step 8 (cache) arrives in Phase 8. Step 9: the provider.
+        // Step 8: the cache. A hit never reaches the provider.
+        const { hit, target } = await lookupCache(request, ctx, chat, route.name);
         const admitted: Admitted = {
           request,
           reply,
@@ -490,7 +684,11 @@ export const chatRoutes =
           chat,
           chain: modelChain(deps.config, route),
           reservation,
+          cache: target,
         };
+        if (hit !== null) return await respondFromCache(admitted, hit);
+
+        // Step 9: the provider.
         return await (chat.stream ? respondStreaming(admitted) : respondComplete(admitted));
       } catch (err) {
         if (!ctx.logged) {

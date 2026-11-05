@@ -151,6 +151,19 @@ describe('loadEnv', () => {
     });
   });
 
+  describe('CACHE_TTL_SECONDS', () => {
+    it('defaults to a day and can be zero (no expiry)', () => {
+      expect(loadEnv(base).cacheTtlMs).toBe(86_400_000);
+      expect(loadEnv({ ...base, CACHE_TTL_SECONDS: '0' }).cacheTtlMs).toBe(0);
+      expect(loadEnv({ ...base, CACHE_TTL_SECONDS: '60' }).cacheTtlMs).toBe(60_000);
+    });
+
+    it('rejects nonsense', () => {
+      expect(() => loadEnv({ ...base, CACHE_TTL_SECONDS: 'forever' })).toThrow(/CACHE_TTL_SECONDS/);
+      expect(() => loadEnv({ ...base, CACHE_TTL_SECONDS: '-5' })).toThrow(/CACHE_TTL_SECONDS/);
+    });
+  });
+
   describe('ADMIN_TOKEN', () => {
     it('is required', () => {
       expect(() => loadEnv({ DATABASE_URL: DB, REDIS_URL: REDIS })).toThrow(

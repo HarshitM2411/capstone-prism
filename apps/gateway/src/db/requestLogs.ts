@@ -25,6 +25,8 @@ export interface RequestLogEntry {
   costUnits?: bigint;
   /** The token counts are our estimate (a stream that ended without the provider's usage). */
   usageEstimated?: boolean;
+  /** Answered from the semantic cache (`hit`) or not (`miss`, the default). */
+  cache?: 'hit' | 'miss';
   /** For `auto` requests: the chosen tier and why (never contains prompt text). */
   routeReason?: string | null;
   latencyMs: number;
@@ -60,8 +62,8 @@ export async function insertRequestLog(db: Queryable, entry: RequestLogEntry): P
     `INSERT INTO request_logs
        (request_id, key_id, requested_model, resolved_model, resolved_provider, fallback, retries,
         status, http_status, error_code, prompt_tokens, completion_tokens, cost_usd, latency_ms,
-        usage_estimated, time_to_first_token_ms, route_reason)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+        usage_estimated, time_to_first_token_ms, route_reason, cache)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
     [
       entry.requestId,
       entry.keyId,
@@ -82,6 +84,7 @@ export async function insertRequestLog(db: Queryable, entry: RequestLogEntry): P
         ? null
         : Math.max(0, Math.round(entry.timeToFirstTokenMs)),
       cleanRouteReason(entry.routeReason),
+      entry.cache ?? 'miss',
     ],
   );
 }

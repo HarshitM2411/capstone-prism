@@ -68,10 +68,15 @@ export class WorkerEmbedder implements Embedder {
   private failedAt = 0;
   private failure: Error | null = null;
   private closed = false;
+  private loaded = false;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
 
   constructor(private readonly options: WorkerEmbedderOptions) {}
+
+  isReady(): boolean {
+    return this.loaded && this.worker !== null;
+  }
 
   ready(): Promise<void> {
     if (this.closed) return Promise.reject(new Error('the embedder is closed'));
@@ -110,6 +115,7 @@ export class WorkerEmbedder implements Embedder {
       worker.on('message', (message: Outgoing) => {
         if (message.type === 'ready') {
           settled = true;
+          this.loaded = true;
           resolve();
         } else if (message.type === 'load_failed') {
           fail(new Error(`embedding model could not be loaded: ${message.message}`));
@@ -125,6 +131,7 @@ export class WorkerEmbedder implements Embedder {
   private onWorkerGone(worker: Worker, error: Error): void {
     if (this.worker !== worker) return;
     this.worker = null;
+    this.loaded = false;
     this.loading = null;
     this.failure = error;
     this.failedAt = Date.now();
@@ -165,6 +172,7 @@ export class WorkerEmbedder implements Embedder {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.loaded = false;
     const worker = this.worker;
     this.worker = null;
     this.loading = null;

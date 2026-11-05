@@ -42,6 +42,8 @@ export interface Env {
   embeddingCacheDir: string;
   /** The longest one embedding call may take before callers fall back (edge case 6.9). */
   embeddingTimeoutMs: number;
+  /** How long a cached answer is served, in milliseconds. `0` means entries do not expire. */
+  cacheTtlMs: number;
   /** Token for the /admin/* routes (sent in x-admin-token). Never log it. */
   adminToken: Secret;
   /** Run the (idempotent) tenant seed at startup. */
@@ -205,6 +207,7 @@ export function loadEnv(
     streamMaxDurationMs,
     embeddingModel: source.EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL,
     embeddingCacheDir: source.EMBEDDING_CACHE_DIR?.trim() || DEFAULT_EMBEDDING_CACHE_DIR,
+    cacheTtlMs: parseInteger(source, 'CACHE_TTL_SECONDS', 86_400, 0, 31_536_000) * 1000,
     embeddingTimeoutMs: parseInteger(source, 'EMBEDDING_TIMEOUT_MS', 1500, 50, 30_000),
     adminToken,
     dataDir,

@@ -9,7 +9,7 @@ import type { OpenedStream } from '../routing/executor.js';
  *
  * The body is pull-based: the next upstream chunk is only read when the client has taken the
  * previous one, so a slow client slows the provider read instead of growing a buffer (edge case
- * 9.5). Nothing is accumulated except counters. Once the first chunk has been relayed the
+ * 9.5). Nothing is accumulated except counters (and, only when the caller asks for it so the answer\n * can be cached, the text up to a size cap). Once the first chunk has been relayed the
  * provider is final: a failure ends the stream with an SSE `error` event and `[DONE]`, never with
  * a switch to another provider (edge cases 8.14, 9.2).
  *
@@ -28,6 +28,13 @@ export interface StreamSummary {
   timeToFirstTokenMs: number | null;
   /** The provider failure behind an `upstream_failed` end, when there was one. */
   failure: ProviderError | null;
+  /**
+   * The complete text, only for a stream that completed and was asked to collect it (and fit in
+   * the cap); `null` otherwise. This is what the semantic cache stores.
+   */
+  content: string | null;
+  /** The provider's finish reason, if it sent one. */
+  finishReason: string | null;
 }
 
 export interface BilledUsage {
@@ -87,6 +94,8 @@ export interface RelayOptions {
   includeUsage: boolean;
   /** Used when the provider never reports usage. */
   promptTokensEstimate: number;
+  /** Keep the delivered text, up to this many characters, for the summary. `0` keeps none. */
+  collectMaxChars?: number;
   /** The longest the whole stream may last, however slow the client or the provider. */
   maxDurationMs: number;
   /** Milliseconds since the request started. */
@@ -120,6 +129,10 @@ export function createSseBody(options: RelayOptions): SseBody {
   let end: StreamEnd | null = null;
   let failure: ProviderError | null = null;
   let capped = false;
+  const collectMax = options.collectMaxChars ?? 0;
+  let text = '';
+  let textOverflow = false;
+  let finishReason: string | null = null;
   let finalizing: Promise<void> | null = null;
   const timers: { cap?: NodeJS.Timeout } = {};
   let markDone!: () => void;
@@ -131,6 +144,8 @@ export function createSseBody(options: RelayOptions): SseBody {
     deliveredTokens: counter.count,
     timeToFirstTokenMs,
     failure,
+    content: collectMax > 0 && end === 'complete' && !textOverflow ? text : null,
+    finishReason,
   });
 
   const onResponseClosed = (): void => {
@@ -183,6 +198,15 @@ export function createSseBody(options: RelayOptions): SseBody {
       while (!step.done) {
         const piece = step.value;
         if (piece.usage !== null) usage = piece.usage;
+        if (piece.finishReason !== null) finishReason = piece.finishReason;
+        if (collectMax > 0 && !textOverflow) {
+          if (text.length + piece.content.length > collectMax) {
+            textOverflow = true;
+            text = '';
+          } else {
+            text += piece.content;
+          }
+        }
         if (piece.content !== '' || piece.finishReason !== null) {
           if (piece.content !== '') {
             counter.add(piece.content);
