@@ -295,8 +295,8 @@ describe('request_logs completeness on every code path (eval E5)', () => {
       requested_model: 'fast',
       resolved_provider: null,
       resolved_model: null,
-      prompt_tokens: 0,
-      completion_tokens: 0,
+      prompt_tokens: rowOf(all, results.miss!).prompt_tokens,
+      completion_tokens: rowOf(all, results.miss!).completion_tokens,
       fallback: false,
       retries: 0,
     });
@@ -641,6 +641,38 @@ describe('accounting reconciles exactly (eval E4, exit criterion of phase 9)', (
     expect(formatUsd(apiCost)).not.toBe('0');
   });
 
+  it('matches what a client adds up from its own responses, cache hits included (the load test’s check)', async () => {
+    const instance = startApp();
+    const responses: LightMyRequestResponse[] = [];
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < 3; i++) {
+        responses.push(
+          await ask(instance, SEARCH, chat('fast', `Client side question ${i} on queues`)),
+        );
+        if (round === 0) await waitForCacheEntries(i + 1);
+      }
+    }
+    expect(responses.filter((r) => r.headers['x-prism-cache'] === 'hit')).toHaveLength(3);
+
+    const prompt = responses.reduce((s, r) => s + (r.json().usage.prompt_tokens as number), 0);
+    const completion = responses.reduce(
+      (s, r) => s + (r.json().usage.completion_tokens as number),
+      0,
+    );
+    const cost = responses.reduce(
+      (s, r) => s + parseUsd(r.headers['x-prism-cost-usd'] as string),
+      0n,
+    );
+
+    await waitForRows(6);
+    const usage = (await admin(instance, '/admin/usage?key=search')).json().keys[0];
+    expect(usage.requests).toBe(6);
+    expect(usage.cache_hits).toBe(3);
+    expect(usage.prompt_tokens).toBe(prompt);
+    expect(usage.completion_tokens).toBe(completion);
+    expect(usage.cost_usd).toBe(toSqlNumeric(cost));
+  });
+
   it('stays exact under many concurrent requests on one key', async () => {
     const instance = startApp();
     const N = 60;
@@ -776,8 +808,9 @@ describe('full pipeline: auto → miss → retry + failover → stream → cache
         resolved_model: null,
         cache: 'hit',
         route_reason: 'fast: simple: test verdict',
-        prompt_tokens: 0,
-        completion_tokens: 0,
+        // A hit reports the stored answer's usage (what clients see) at zero cost.
+        prompt_tokens: missRow.prompt_tokens,
+        completion_tokens: missRow.completion_tokens,
       });
       expect(units(row)).toBe(0n);
     }
@@ -802,8 +835,8 @@ describe('full pipeline: auto → miss → retry + failover → stream → cache
       cache_hits: 2,
       fallbacks: 1,
       cost_usd: toSqlNumeric(charged),
-      prompt_tokens: missRow.prompt_tokens,
-      completion_tokens: missRow.completion_tokens,
+      prompt_tokens: missRow.prompt_tokens * 3,
+      completion_tokens: missRow.completion_tokens * 3,
     });
     const logs = (await admin(instance, '/admin/logs?key=research')).json();
     expect(logs.data.map((r: { status: string }) => r.status)).toEqual([

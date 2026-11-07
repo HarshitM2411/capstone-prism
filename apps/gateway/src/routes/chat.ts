@@ -320,8 +320,10 @@ export const chatRoutes =
         status: 'cache_hit',
         httpStatus: 200,
         errorCode: null,
-        promptTokens: 0,
-        completionTokens: 0,
+        // The tokens the client is told about (the stored answer's usage), so the usage API adds up to
+        // what clients see; nothing was billed, so the cost is zero.
+        promptTokens: cached.promptTokens,
+        completionTokens: cached.completionTokens,
         costUnits: 0n,
         cache: 'hit',
         routeReason: ctx.routeReason,

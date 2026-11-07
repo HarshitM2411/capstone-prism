@@ -113,9 +113,9 @@ describe('semantic cache: hits and misses', () => {
     expect(providerCalls(t)).toBe(1);
   });
 
-  it('records the hit: status, zero cost and tokens, the original provider, nothing held', async () => {
+  it('records the hit: status, zero cost, the stored usage, no provider, nothing held', async () => {
     const t = start();
-    await ask(t, A1);
+    const miss = await ask(t, A1);
     await waitForEntries(t.cache, 1);
     const spentAfterMiss = t.budget.spent.get(1)!;
 
@@ -126,8 +126,9 @@ describe('semantic cache: hits and misses', () => {
       httpStatus: 200,
       cache: 'hit',
       costUnits: 0n,
-      promptTokens: 0,
-      completionTokens: 0,
+      // The usage the client is shown for the stored answer (nothing was billed for it).
+      promptTokens: miss.json().usage.prompt_tokens,
+      completionTokens: miss.json().usage.completion_tokens,
       resolvedProvider: null,
       resolvedModel: null,
     });
