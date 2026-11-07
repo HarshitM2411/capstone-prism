@@ -3,6 +3,7 @@ import { ConfigError, loadEnv, type Env } from './config/env.js';
 import { findKeyByRawKey } from './db/keys.js';
 import { checkDatabase, createPool } from './db/pool.js';
 import { PgCacheStore } from './cache/store.js';
+import { PgMeteringStore } from './metering/store.js';
 import { createRequestLogWriter } from './db/requestLogs.js';
 import { PgBudgetStore, reconcileStaleReservations } from './limits/budget.js';
 import { RedisRateLimiter } from './limits/rpm.js';
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
     classifier,
     cache,
     embedder,
+    metering: new PgMeteringStore(pool),
     timeouts: {
       firstByteMs: env.providerFirstByteTimeoutMs,
       idleMs: env.providerIdleTimeoutMs,

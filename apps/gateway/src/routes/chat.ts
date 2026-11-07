@@ -304,15 +304,17 @@ export const chatRoutes =
     async function respondFromCache(admitted: Admitted, hit: CacheHit) {
       const { reply, ctx, chat, reservation } = admitted;
       const cached = hit.response;
-      ctx.resolvedModel = cached.model;
-      ctx.resolvedProvider = cached.provider;
+      // No provider was called, so none is recorded (edge case 10.8). The stored entry still names
+      // who produced the answer, for anyone who needs it.
+      ctx.resolvedModel = null;
+      ctx.resolvedProvider = null;
 
       await deps.budget.settle(reservation, 0n, {
         requestId: ctx.requestId,
         keyId: ctx.auth!.keyId,
         requestedModel: ctx.requestedModel,
-        resolvedModel: cached.model,
-        resolvedProvider: cached.provider,
+        resolvedModel: null,
+        resolvedProvider: null,
         fallback: false,
         retries: 0,
         status: 'cache_hit',
@@ -327,10 +329,8 @@ export const chatRoutes =
       });
       ctx.logged = true;
 
-      // `provider/model` names who originally produced the answer; `x-prism-cache: hit` says it
-      // was not produced again.
       setPrismHeaders(reply, {
-        provider: `${cached.provider}/${cached.model}`,
+        provider: 'none',
         cache: 'hit',
         fallback: false,
         costUnits: chat.stream ? null : 0n,

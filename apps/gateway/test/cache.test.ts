@@ -128,8 +128,8 @@ describe('semantic cache: hits and misses', () => {
       costUnits: 0n,
       promptTokens: 0,
       completionTokens: 0,
-      resolvedProvider: 'alpha',
-      resolvedModel: 'alpha-small',
+      resolvedProvider: null,
+      resolvedModel: null,
     });
     expect(t.logs.entries[0]!.cache ?? 'miss').toBe('miss');
     expect(t.budget.spent.get(1)).toBe(spentAfterMiss);
@@ -300,7 +300,8 @@ describe('semantic cache: when it is off or must not be used', () => {
 
     const hit = await ask(t, A1);
     expect(hit.headers['x-prism-cache']).toBe('hit');
-    expect(hit.headers['x-prism-provider']).toBe('beta/beta-small');
+    // No provider served the hit; the entry itself remembers who produced the answer.
+    expect(hit.headers['x-prism-provider']).toBe('none');
   });
 
   it('skips the cache while the embedding model is still loading (edge case 7.20)', async () => {

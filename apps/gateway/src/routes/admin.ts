@@ -2,12 +2,18 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { CacheKeyStats, CacheStore } from '../cache/store.js';
 import { verifyAdminToken } from '../http/auth.js';
 import { serviceUnavailable } from '../http/errors.js';
+import type { MeteringStore } from '../metering/store.js';
+import { registerMeteringRoutes } from './adminMetering.js';
 
 export interface AdminRouteDeps {
   /** The expected token. Compared in constant time and never logged. */
   adminToken: string;
   /** Source of `/admin/cache/stats`; `null` when the cache is not configured. */
   cache?: CacheStore | null;
+  /** Source of `/admin/usage` and `/admin/logs`; without it those routes answer 503. */
+  metering?: MeteringStore | null;
+  /** Clock for the budget period; tests fix it. */
+  now?: () => Date;
 }
 
 /**
@@ -43,7 +49,7 @@ function keyView(key: CacheKeyStats) {
 /**
  * The admin plane (`/admin/*`). Every route registered in this plugin requires the
  * `x-admin-token` header; virtual keys are not accepted here (decision D10) and the admin token is
- * not accepted on the data plane. The usage and logs routes arrive in Phases 9 and 10.
+ * not accepted on the data plane.
  */
 export const adminRoutes =
   (deps: AdminRouteDeps): FastifyPluginAsync =>
@@ -54,6 +60,8 @@ export const adminRoutes =
 
     // Lets the console check that a token works before it shows anything.
     app.get('/admin/ping', async () => ({ status: 'ok' }));
+
+    registerMeteringRoutes(app, deps.metering ?? null, deps.now);
 
     app.get('/admin/cache/stats', async (request) => {
       if (deps.cache === undefined || deps.cache === null) {

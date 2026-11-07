@@ -7,6 +7,7 @@ import { toPrismError } from './http/errors.js';
 import type { CacheStore } from './cache/store.js';
 import type { Embedder } from './embeddings/embedder.js';
 import type { BudgetStore } from './limits/budget.js';
+import type { MeteringStore } from './metering/store.js';
 import type { RateLimiter } from './limits/rpm.js';
 import { DifficultyClassifier, type Classifier } from './routing/classifier.js';
 import type { CallTimeouts, ProviderRegistry } from './providers/types.js';
@@ -35,6 +36,10 @@ export interface AppOptions {
   cache?: CacheStore;
   /** Turns prompts into vectors for the cache. */
   embedder?: Embedder;
+  /** Read side of metering for `/admin/usage` and `/admin/logs`. */
+  metering?: MeteringStore;
+  /** Clock used for the admin budget period (default: the real time). */
+  now?: () => Date;
   /** Limits applied to every provider call; `deadlineMs` also caps all attempts of a request. */
   timeouts: CallTimeouts;
   /** Overrides the retry policy from the gateway config (tests use a fast one). */
@@ -168,7 +173,14 @@ export function buildApp(options: AppOptions): FastifyInstance {
       track,
     }),
   );
-  void app.register(adminRoutes({ adminToken: options.adminToken, cache: options.cache ?? null }));
+  void app.register(
+    adminRoutes({
+      adminToken: options.adminToken,
+      cache: options.cache ?? null,
+      metering: options.metering ?? null,
+      now: options.now,
+    }),
+  );
 
   return app;
 }
