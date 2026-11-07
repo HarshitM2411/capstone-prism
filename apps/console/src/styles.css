@@ -1,0 +1,158 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1c1e21;
+  background: #f5f6f8;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 3rem;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.spacer {
+  flex: 1;
+}
+nav {
+  display: flex;
+  gap: 0.25rem;
+}
+button,
+input,
+select {
+  font: inherit;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #c4c8cf;
+  border-radius: 4px;
+  background: #fff;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.tab.active {
+  background: #1c1e21;
+  color: #fff;
+  border-color: #1c1e21;
+}
+.toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.cards {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.card {
+  background: #fff;
+  border: 1px solid #dfe2e6;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  min-width: 7rem;
+}
+.big {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #dfe2e6;
+  margin-bottom: 0.75rem;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #eceef1;
+  vertical-align: top;
+}
+th {
+  background: #eef0f3;
+  font-size: 0.8rem;
+}
+.num {
+  text-align: right;
+  white-space: nowrap;
+}
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+}
+.small {
+  font-size: 0.8rem;
+}
+.muted {
+  color: #6b7280;
+}
+.error {
+  color: #b42318;
+}
+.badge {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #e5e7eb;
+}
+.badge.good {
+  background: #d1f2dc;
+}
+.badge.info {
+  background: #d6e6ff;
+}
+.badge.warn {
+  background: #ffe8b8;
+}
+.badge.bad {
+  background: #fcd2cf;
+}
+.bar {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 2px;
+  min-width: 120px;
+}
+.fill {
+  height: 100%;
+  background: #4c8bf5;
+}
+.fill.over {
+  background: #d92d20;
+}
+.login {
+  max-width: 360px;
+  margin-top: 6rem;
+}
+.login form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.login label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}

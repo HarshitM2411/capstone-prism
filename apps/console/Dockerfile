@@ -15,5 +15,6 @@ COPY apps/console apps/console
 RUN pnpm --filter @prism/console build
 
 FROM nginx:1.27-alpine
+COPY apps/console/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/console/dist /usr/share/nginx/html
 EXPOSE 80

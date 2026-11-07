@@ -254,12 +254,14 @@ All trap cases are correct: the short-but-hard `route_011/012/013/019/020` (proo
 
 **Goal:** A minimal but functional dashboard — not polished, just correct ("vibe-coding fine" per spec).
 
-- [ ] Usage-by-key view.
-- [ ] Recent requests view (status, requested/resolved model, cache, fallback flag, route reason, cost, latency; rejections visible).
-- [ ] Cache hit rate view.
-- [ ] Console reads only from the admin API (`/admin/*`, demo admin token) — no direct DB access.
+- [x] Usage-by-key view.
+- [x] Recent requests view (status, requested/resolved model, cache, fallback flag, route reason, cost, latency; rejections visible).
+- [x] Cache hit rate view.
+- [x] Console reads only from the admin API (`/admin/*`, demo admin token) — no direct DB access.
 
 **Exit criteria:** Console visibly reflects real gateway activity when traffic is sent through it during a manual check, including a budget rejection, a rate-limit rejection and a fallback.
+
+**Status: complete.** Notes: `apps/console` is a plain React page with a sign-in step (the admin token is checked against `/admin/ping`, kept in `sessionStorage` only, and sent as `x-admin-token`) and three views that call nothing but `/admin/usage`, `/admin/logs` and `/admin/cache/stats`: **Usage by key** (totals, per-key requests, cache hits, fallbacks, rejections, errors, tokens, exact cost, a monthly-budget bar, and an optional date window), **Recent requests** (newest first with key, status filters, requested and serving model, status and error code, cache, fallback and retries, route reason, tokens, cost, latency, and "Load older" paging) and **Cache** (overall and per-key hit rate with the one stated definition). All three refresh every 5 s unless switched off. In Docker, nginx serves the build and forwards `/admin/` to the gateway, so the browser uses a single origin and the gateway needs no CORS; `vite dev` proxies `/admin` the same way (`GATEWAY_URL`). Checked live in a browser against the Compose stack after sending a free-tier burst, a `budget-demo` request, and a request while `alpha` was down: a wrong token is refused, and the rate-limit rejections (`429`), the budget rejection (`402`), the cache hits and the fallback to `beta/beta-small` (2 retries) all appear, with numbers that match `/admin/usage`. The visual design is intentionally minimal.
 
 ---
 
