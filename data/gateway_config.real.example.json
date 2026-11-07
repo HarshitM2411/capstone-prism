@@ -5,13 +5,13 @@
     { "name": "beta", "base_url": "http://beta:9002/v1", "api_key": "mock-key-beta" },
     {
       "name": "openai",
-      "base_url": "https://api.openai.com/v1",
+      "base_url": "env:OPENAI_BASE_URL",
       "api_key": "env:OPENAI_API_KEY",
-      "models": ["gpt-4o-mini"]
+      "models": ["openai/gpt-4o-mini"]
     }
   ],
   "model_aliases": {
-    "fast": { "primary": "gpt-4o-mini", "fallbacks": ["alpha-small", "beta-small"] },
+    "fast": { "primary": "openai/gpt-4o-mini", "fallbacks": ["alpha-small", "beta-small"] },
     "smart": { "primary": "alpha-large", "fallbacks": ["beta-large"] },
     "auto": { "route_by_difficulty": { "simple": "fast", "complex": "smart" } }
   },

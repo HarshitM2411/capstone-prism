@@ -128,23 +128,24 @@ function parsePricing(raw: unknown, problems: string[]): Map<string, ModelInfoPr
 type ModelInfoPrice = Omit<ModelInfo, 'name' | 'provider'>;
 
 /**
- * A provider's `api_key` is either the key itself (the mock providers' placeholder keys) or
- * `env:NAME`, which reads the key from that environment variable so a real key never has to be
- * written into a file. A missing or empty variable is a configuration error naming the variable
+ * A provider's `api_key` (and `base_url`) is either the value itself (the mock providers' placeholder
+ * keys and URLs) or `env:NAME`, which reads it from that environment variable so a real key never has
+ * to be written into a file. A missing or empty variable is a configuration error naming the variable
  * (never its value).
  */
-function resolveApiKey(
-  apiKey: string,
+function resolveEnvRef(
+  raw: string,
+  field: string,
   where: string,
   env: NodeJS.ProcessEnv,
   problems: string[],
 ): string | null {
-  if (!apiKey.startsWith('env:')) return apiKey;
-  const variable = apiKey.slice('env:'.length).trim();
+  if (!raw.startsWith('env:')) return raw;
+  const variable = raw.slice('env:'.length).trim();
   const value = variable === '' ? undefined : env[variable]?.trim();
   if (value === undefined || value === '') {
     problems.push(
-      `${where}.api_key refers to the environment variable "${variable}" which is not set`,
+      `${where}.${field} refers to the environment variable "${variable}" which is not set`,
     );
     return null;
   }
@@ -167,7 +168,7 @@ function parseProviders(
       problems.push(`${where} must be an object`);
       return;
     }
-    const { name, base_url: baseUrl, api_key: apiKey, models } = entry;
+    const { name, base_url: baseUrlRaw, api_key: apiKey, models } = entry;
     if (!isNonEmptyString(name)) {
       problems.push(`${where}.name must be a non-empty string`);
       return;
@@ -176,10 +177,12 @@ function parseProviders(
       problems.push(`${where}: duplicate provider name "${name}"`);
       return;
     }
-    if (!isNonEmptyString(baseUrl)) {
+    if (!isNonEmptyString(baseUrlRaw)) {
       problems.push(`${where} ("${name}").base_url must be a non-empty string`);
       return;
     }
+    const baseUrl = resolveEnvRef(baseUrlRaw, 'base_url', `${where} ("${name}")`, env, problems);
+    if (baseUrl === null) return;
     try {
       const url = new URL(baseUrl);
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('bad protocol');
@@ -191,7 +194,7 @@ function parseProviders(
       problems.push(`${where} ("${name}").api_key must be a non-empty string`);
       return;
     }
-    const resolvedKey = resolveApiKey(apiKey, `${where} ("${name}")`, env, problems);
+    const resolvedKey = resolveEnvRef(apiKey, 'api_key', `${where} ("${name}")`, env, problems);
     if (resolvedKey === null) return;
     let explicitModels: string[] | null = null;
     if (models !== undefined) {

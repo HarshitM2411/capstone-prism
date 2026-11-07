@@ -183,7 +183,7 @@ cache hits and the fallback (with its two retries) all appear in "Recent request
 
 ## 9. Known limitations
 
-- **No live check against a real provider yet.** The config path is built and tested (`env:` keys, explicit model lists, example config in `docs/real-provider.md`), but a live call needs an API key and spend that the project owner approves.
+- **Real provider:** run live once (OpenRouter, openai/gpt-4o-mini; see [erification/real_provider.txt](verification/real_provider.txt)). Failover away from a real provider was not exercised live.
 - **Pair B** of the cache sample does not hit at a safe threshold (see §2).
 - **Repeated smoke-test runs need a cleared cache** (see §2).
 - **A slow provider costs about three timeouts before failover** (see §6); no health-based provider skipping.

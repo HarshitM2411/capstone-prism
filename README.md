@@ -134,7 +134,7 @@ All have defaults in `docker-compose.yml`; copy `.env.example` to `.env` to over
 | `EMBEDDING_MODEL`, `EMBEDDING_TIMEOUT_MS` | MiniLM, `1500` | local embeddings for routing and cache |
 | `CACHE_TTL_SECONDS` | `86400` | how long a cached answer is served (`0` = never expires) |
 | `DB_POOL_MAX`, `DB_CONNECT_TIMEOUT_MS` | `10`, `5000` | Postgres pool |
-| `OPENAI_API_KEY`, `GROQ_API_KEY` | empty | only for real providers, see below |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `GROQ_API_KEY` | empty, `https://api.openai.com/v1`, empty | only for real providers, see below |
 
 Invalid values stop the gateway at startup with a message naming the variable. Secrets are never logged.
 
@@ -145,7 +145,7 @@ Invalid values stop the gateway at startup with a message naming the variable. S
   fallbacks, the retry policy and the `auto` mapping.
 - `data/model_pricing.json` holds the price per 1M tokens for every model; a model without a price is a
   startup error, so cost is never silently zero.
-- A provider key may be written `"env:NAME"`, read from the environment at startup.
+- A provider `api_key` or `base_url` may be written `"env:NAME"`, read from the environment at startup.
 - To use a real provider, follow [docs/real-provider.md](docs/real-provider.md). It is a configuration change,
   not a code change.
 
@@ -230,8 +230,7 @@ Details and diagrams are in [docs/architecture.md](docs/architecture.md). The de
 
 ## Known limitations
 
-- No live check against a real provider has been run yet; the path is exercised against mocks and local
-  OpenAI-compatible test servers.
+- The real-provider path was run live once (OpenRouter, openai/gpt-4o-mini) but failover away from a real provider was only tested with the mocks.
 - A slow (not failing) provider costs about three timeouts (about 6.6 s with the defaults) before failover;
   there is no health-based skipping of a degraded provider.
 - The cache has a TTL but no size cap. Cache pair B of the starter sample does not hit at a safe threshold.

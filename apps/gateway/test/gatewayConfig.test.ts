@@ -262,6 +262,20 @@ describe('provider keys from the environment', () => {
     expect(parsed.aliases.get('fast')?.chain).toContain('gpt-4o-mini');
   });
 
+  it('reads an env:NAME base_url the same way, trimming a trailing slash', () => {
+    const { pricing, config } = withRealProvider('env:OPENAI_API_KEY');
+    config.providers[2].base_url = 'env:OPENAI_BASE_URL';
+    const env = { OPENAI_API_KEY: 'sk-x', OPENAI_BASE_URL: 'https://proxy.example.com/v1/' };
+    expect(parseGatewayConfig(pricing, config, env).providers.get('openai')?.baseUrl).toBe(
+      'https://proxy.example.com/v1',
+    );
+    expect(() => parseGatewayConfig(pricing, config, { OPENAI_API_KEY: 'sk-x' })).toThrow(
+      /\("openai"\)\.base_url refers to the environment variable "OPENAI_BASE_URL"/,
+    );
+    expect(() =>
+      parseGatewayConfig(pricing, config, { OPENAI_API_KEY: 'sk-x', OPENAI_BASE_URL: 'ftp://x' }),
+    ).toThrow(/base_url must be an http\(s\) URL/);
+  });
   it.each([{}, { OPENAI_API_KEY: '' }, { OPENAI_API_KEY: '   ' }])(
     'names the missing variable (never a value) when it is not set: %j',
     (env) => {

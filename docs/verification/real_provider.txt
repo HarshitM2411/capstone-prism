@@ -1,0 +1,14 @@
+Real provider run: OpenRouter (OpenAI-compatible) through the unchanged OpenAICompatibleAdapter
+Config: data/gateway_config.real.example.json (base_url and api_key from the environment), model openai/gpt-4o-mini
+priced at 0.15 / 0.60 USD per 1M tokens in data/model_pricing.json. Run on 2026-11-07. No keys appear below.
+
+non-stream (research key, alias fast): 200, x-prism-provider openai/openai/gpt-4o-mini, usage 14 prompt + 2 completion,
+  x-prism-cost-usd 0.0000033  (= 14*0.15e-6 + 2*0.60e-6, exact)
+stream: 200, 17 SSE chunks, [DONE]; log row: provider usage 15 + 14 tokens (usage_estimated false), cost 0.00001065 (exact)
+smoke_test.py (search key, model fast, cache cleared): 17 passed, 1 warnings (pair B), 0 failed
+load_test.py (free-tier key, 30 requests, 10 concurrent, rpm 10): 10 accepted, 20 rate limited, over-admission check OK
+  client side:  256 prompt tokens, 5218 completion tokens, 0.003169 USD (sum of cost headers)
+  /admin/usage delta for the run: 256 prompt, 5218 completion, 0.0031692 USD  -> identical
+Latency through the real provider: avg 7762 ms, p95 9562 ms under 10 concurrent long answers (the free tier key has no max_tokens cap)
+Not exercised against the real provider: failover (a real provider cannot be made to fail on demand); that path is covered
+  with the mocks (docs/verification/failure_drill.txt).

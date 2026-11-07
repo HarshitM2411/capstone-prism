@@ -22,3 +22,6 @@ __pycache__/
 
 # Downloaded embedding models (fetched from Hugging Face on first use)
 .models/
+
+# Local real-provider config (copy of data/gateway_config.real.example.json)
+data/gateway_config.real.json

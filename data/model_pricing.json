@@ -3,5 +3,6 @@
   "alpha-small": { "input_per_1m": 0.15, "output_per_1m": 0.60 },
   "alpha-large": { "input_per_1m": 3.00, "output_per_1m": 15.00 },
   "beta-small":  { "input_per_1m": 0.10, "output_per_1m": 0.40 },
-  "beta-large":  { "input_per_1m": 2.50, "output_per_1m": 10.00 }
+  "beta-large":  { "input_per_1m": 2.50, "output_per_1m": 10.00 },
+  "openai/gpt-4o-mini": { "input_per_1m": 0.15, "output_per_1m": 0.60 }
 }

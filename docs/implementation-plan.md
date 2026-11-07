@@ -290,9 +290,9 @@ All trap cases are correct: the short-but-hard `route_011/012/013/019/020` (proo
 
 - [x] Register one real provider (for example OpenAI, Groq or a local Ollama) with the existing `OpenAICompatibleAdapter` — config only, no core code changes; append its models and current prices to `model_pricing.json`.
 - [x] Update the routing config to point an alias (or one fallback slot) at the real provider (config change only).
-- [ ] Re-run the Phase 5/6/11 tests against the real provider to confirm identical behavior (streaming, failover, metering) through the same code paths. Real API keys and spend need your approval first, and keys come from the environment only.
+- [x] Re-run the Phase 5/6/11 tests against the real provider to confirm identical behavior (streaming, failover, metering) through the same code paths. Real API keys and spend need your approval first, and keys come from the environment only.
 
-**Status:** config side done, live run pending. data/gateway_config.real.example.json and docs/real-provider.md register OpenAI through the unchanged adapter and put it first in the ast chain. The one code addition is in the config loader, not the gateway core: a provider pi_key may be env:NAME, read from the environment at startup, so keys never live in a tracked file (tested). The third item (re-run against a live provider) needs an API key and spend approval and has **not** been run; it stays unticked.
+**Status:** done. `data/gateway_config.real.example.json` and `docs/real-provider.md` register a real OpenAI-compatible provider through the unchanged adapter. The only code addition is in the config loader, not the gateway core: a provider `api_key` or `base_url` may be `env:NAME`, read from the environment at startup, so keys never live in a tracked file (tested). Run live against OpenRouter with `openai/gpt-4o-mini` using the project owner's key: smoke test 17 passed, load test reconciled exactly with `/admin/usage`, streaming and non-streaming costs exact ([`verification/real_provider.txt`](verification/real_provider.txt)). Failover away from the real provider was not exercised live (it cannot be forced); it is covered with the mocks.
 
 **Exit criteria:** Switching between mock and real provider is a config change, not a code change — demonstrated by running the same test suite against both.
 
