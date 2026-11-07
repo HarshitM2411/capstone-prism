@@ -302,11 +302,13 @@ All trap cases are correct: the short-but-hard `route_011/012/013/019/020` (proo
 
 **Goal:** Everything the spec lists as a deliverable actually exists and is reviewable.
 
-- [ ] README: setup instructions, environment variables, how to seed keys and configure providers, how to run the app and the mock providers, API overview (data plane and admin plane), how to run the smoke and load tests, architecture summary, routing/failover design, cache scoping, budget accounting, design decisions, known limitations.
-- [ ] Confirm seeded demo keys + reproduction instructions (mock providers) are documented and correct.
-- [ ] Verification report finalized (Phase 11 outputs).
-- [ ] Explainer video script/checklist following the recommended demo flow: healthy gateway and both mocks; non-streaming request with `search` key showing headers; streaming; repeat prompt and paraphrase → `x-prism-cache: hit`; `auto` with the research key (`route_011` → `smart`, `route_006` → `fast`) plus the routing eval accuracy; burst past the free-tier limit; budget-demo key (first request consumes the budget, second rejected); live provider failover (`POST /admin/config {"mode": "down"}` on `alpha`) with `x-prism-fallback: true`; ops console; smoke and load test summaries — record once everything above is demo-ready.
+- [x] README: setup instructions, environment variables, how to seed keys and configure providers, how to run the app and the mock providers, API overview (data plane and admin plane), how to run the smoke and load tests, architecture summary, routing/failover design, cache scoping, budget accounting, design decisions, known limitations.
+- [x] Confirm seeded demo keys + reproduction instructions (mock providers) are documented and correct.
+- [x] Verification report finalized (Phase 11 outputs).
+- [x] Explainer video script/checklist following the recommended demo flow: healthy gateway and both mocks; non-streaming request with `search` key showing headers; streaming; repeat prompt and paraphrase → `x-prism-cache: hit`; `auto` with the research key (`route_011` → `smart`, `route_006` → `fast`) plus the routing eval accuracy; burst past the free-tier limit; budget-demo key (first request consumes the budget, second rejected); live provider failover (`POST /admin/config {"mode": "down"}` on `alpha`) with `x-prism-fallback: true`; ops console; smoke and load test summaries — record once everything above is demo-ready.
 - [ ] Final review pass before anything is pushed to the public GitHub repo — **requires your explicit approval**, per our working agreement.
+
+**Status:** README, docs/demo-script.md and the finalized verification report are written, and the demo flows (headers, cache hit and miss, uto routing, live failover, budget) were re-run against the stack and match the script. The video itself is not recorded (that is yours to do from the script). While writing the README a real defect was found and fixed: docker-compose.yml and .env.example set UPSTREAM_*_TIMEOUT_MS, which the gateway never read; they now use the real names (PROVIDER_FIRST_BYTE_TIMEOUT_MS, PROVIDER_IDLE_TIMEOUT_MS) with the values the verification runs actually used. The final review and any push stay unticked until you approve.
 
 **Exit criteria:** A fresh reviewer could clone the repo, follow the README, and reproduce every claim in the verification report and demo video.
 
