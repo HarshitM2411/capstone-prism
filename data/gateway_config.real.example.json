@@ -1,0 +1,20 @@
+{
+  "_comment": "Example of swapping a real OpenAI-compatible provider in. Copy to gateway_config.real.json, append the model prices (see docs/real-provider.md) to model_pricing.json, set the key in the environment (never in a file) and start with GATEWAY_CONFIG_FILE=gateway_config.real.json. The api_key value 'env:NAME' is read from that environment variable.",
+  "providers": [
+    { "name": "alpha", "base_url": "http://alpha:9001/v1", "api_key": "mock-key-alpha" },
+    { "name": "beta", "base_url": "http://beta:9002/v1", "api_key": "mock-key-beta" },
+    {
+      "name": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "env:OPENAI_API_KEY",
+      "models": ["gpt-4o-mini"]
+    }
+  ],
+  "model_aliases": {
+    "fast": { "primary": "gpt-4o-mini", "fallbacks": ["alpha-small", "beta-small"] },
+    "smart": { "primary": "alpha-large", "fallbacks": ["beta-large"] },
+    "auto": { "route_by_difficulty": { "simple": "fast", "complex": "smart" } }
+  },
+  "retry": { "max_attempts": 3, "initial_backoff_ms": 200, "backoff_multiplier": 2 },
+  "degradation": { "error_rate_threshold": 0.5, "window_seconds": 60, "p95_latency_ms": 5000 }
+}

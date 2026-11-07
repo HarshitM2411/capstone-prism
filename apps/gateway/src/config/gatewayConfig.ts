@@ -127,7 +127,35 @@ function parsePricing(raw: unknown, problems: string[]): Map<string, ModelInfoPr
 
 type ModelInfoPrice = Omit<ModelInfo, 'name' | 'provider'>;
 
-function parseProviders(raw: unknown, problems: string[]): Map<string, ProviderConfig> {
+/**
+ * A provider's `api_key` is either the key itself (the mock providers' placeholder keys) or
+ * `env:NAME`, which reads the key from that environment variable so a real key never has to be
+ * written into a file. A missing or empty variable is a configuration error naming the variable
+ * (never its value).
+ */
+function resolveApiKey(
+  apiKey: string,
+  where: string,
+  env: NodeJS.ProcessEnv,
+  problems: string[],
+): string | null {
+  if (!apiKey.startsWith('env:')) return apiKey;
+  const variable = apiKey.slice('env:'.length).trim();
+  const value = variable === '' ? undefined : env[variable]?.trim();
+  if (value === undefined || value === '') {
+    problems.push(
+      `${where}.api_key refers to the environment variable "${variable}" which is not set`,
+    );
+    return null;
+  }
+  return value;
+}
+
+function parseProviders(
+  raw: unknown,
+  problems: string[],
+  env: NodeJS.ProcessEnv,
+): Map<string, ProviderConfig> {
   const providers = new Map<string, ProviderConfig>();
   if (!Array.isArray(raw) || raw.length === 0) {
     problems.push('config: "providers" must be a non-empty array');
@@ -163,6 +191,8 @@ function parseProviders(raw: unknown, problems: string[]): Map<string, ProviderC
       problems.push(`${where} ("${name}").api_key must be a non-empty string`);
       return;
     }
+    const resolvedKey = resolveApiKey(apiKey, `${where} ("${name}")`, env, problems);
+    if (resolvedKey === null) return;
     let explicitModels: string[] | null = null;
     if (models !== undefined) {
       if (!Array.isArray(models) || !models.every(isNonEmptyString)) {
@@ -174,7 +204,7 @@ function parseProviders(raw: unknown, problems: string[]): Map<string, ProviderC
     providers.set(name, {
       name,
       baseUrl: baseUrl.replace(/\/+$/, ''),
-      apiKey: new Secret(apiKey),
+      apiKey: new Secret(resolvedKey),
       explicitModels,
     });
   });
@@ -379,7 +409,11 @@ function parseDegradation(raw: unknown, problems: string[]): DegradationPolicy {
 }
 
 /** Pure parse + validate step: takes already-parsed JSON so it is trivial to unit test. */
-export function parseGatewayConfig(pricingJson: unknown, configJson: unknown): GatewayConfig {
+export function parseGatewayConfig(
+  pricingJson: unknown,
+  configJson: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): GatewayConfig {
   const problems: string[] = [];
 
   const prices = parsePricing(pricingJson, problems);
@@ -391,7 +425,7 @@ export function parseGatewayConfig(pricingJson: unknown, configJson: unknown): G
   if (!isObject(configJson)) {
     problems.push('gateway config must be a JSON object');
   } else {
-    providers = parseProviders(configJson.providers, problems);
+    providers = parseProviders(configJson.providers, problems, env);
     aliasesRaw = configJson.model_aliases;
     retryRaw = configJson.retry;
     degradationRaw = configJson.degradation;

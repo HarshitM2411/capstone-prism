@@ -100,6 +100,9 @@ services:
       DATA_DIR: /data
       GATEWAY_CONFIG_FILE: ${GATEWAY_CONFIG_FILE:-gateway_config.docker.json}
       SEED_ON_START: ${SEED_ON_START:-true}
+      # Real provider keys (Phase 12): referenced from the gateway config as "env:OPENAI_API_KEY", etc.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
     volumes:
       - ./data:/data:ro

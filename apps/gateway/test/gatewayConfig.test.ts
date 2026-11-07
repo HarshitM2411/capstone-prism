@@ -238,6 +238,53 @@ describe('parseGatewayConfig fail-fast', () => {
   });
 });
 
+describe('provider keys from the environment', () => {
+  /** The starter files plus one real provider, as it would be added for Phase 12. */
+  function withRealProvider(apiKey: string): { pricing: Json; config: Json } {
+    const files = starter();
+    files.pricing['gpt-4o-mini'] = { input_per_1m: 0.15, output_per_1m: 0.6 };
+    files.config.providers.push({
+      name: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      api_key: apiKey,
+      models: ['gpt-4o-mini'],
+    });
+    files.config.model_aliases.fast.fallbacks = ['beta-small', 'gpt-4o-mini'];
+    return files;
+  }
+
+  it('reads an env:NAME key from the environment, and a literal key stays literal', () => {
+    const { pricing, config } = withRealProvider('env:OPENAI_API_KEY');
+    const parsed = parseGatewayConfig(pricing, config, { OPENAI_API_KEY: ' sk-real-secret ' });
+    expect(parsed.providers.get('openai')?.apiKey.reveal()).toBe('sk-real-secret');
+    expect(parsed.providers.get('alpha')?.apiKey.reveal()).toBe('mock-key-alpha');
+    expect(parsed.models.get('gpt-4o-mini')?.provider).toBe('openai');
+    expect(parsed.aliases.get('fast')?.chain).toContain('gpt-4o-mini');
+  });
+
+  it.each([{}, { OPENAI_API_KEY: '' }, { OPENAI_API_KEY: '   ' }])(
+    'names the missing variable (never a value) when it is not set: %j',
+    (env) => {
+      const { pricing, config } = withRealProvider('env:OPENAI_API_KEY');
+      expect(() => parseGatewayConfig(pricing, config, env)).toThrow(
+        /providers\[2\] \("openai"\)\.api_key refers to the environment variable "OPENAI_API_KEY"/,
+      );
+    },
+  );
+
+  it('rejects env: with no variable name', () => {
+    const { pricing, config } = withRealProvider('env:');
+    expect(() => parseGatewayConfig(pricing, config, {})).toThrow(/api_key refers to/);
+  });
+
+  it('never prints the resolved key', () => {
+    const { pricing, config } = withRealProvider('env:OPENAI_API_KEY');
+    const parsed = parseGatewayConfig(pricing, config, { OPENAI_API_KEY: 'sk-real-secret' });
+    expect(JSON.stringify(describeConfig(parsed))).not.toContain('sk-real-secret');
+    expect(JSON.stringify(parsed)).not.toContain('sk-real-secret');
+    expect(String(parsed.providers.get('openai')?.apiKey)).not.toContain('sk-real-secret');
+  });
+});
 describe('loading from disk', () => {
   const dirs: string[] = [];
   afterEach(() => {
